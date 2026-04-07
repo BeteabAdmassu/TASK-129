@@ -680,8 +680,8 @@ func (r *Repository) SearchKnowledgePoints(query string, page, pageSize int) ([]
 		`SELECT id, chapter_id, title, content, tags, classifications, created_at, updated_at,
 		        COUNT(*) OVER() AS total
 		 FROM knowledge_points
-		 WHERE tsv @@ to_tsquery('english', $1)
-		 ORDER BY ts_rank(tsv, to_tsquery('english', $1)) DESC
+		 WHERE search_vector @@ to_tsquery('english', $1)
+		 ORDER BY ts_rank(search_vector, to_tsquery('english', $1)) DESC
 		 LIMIT $2 OFFSET $3`, tsQuery, pageSize, offset,
 	)
 	if err != nil {

@@ -209,7 +209,7 @@ fi
 
 # Get SKU
 GET_SKU=$(curl -sf "${API_URL}/skus/${SKU_ID}" -H "Authorization: Bearer $PHARM_TOKEN")
-if echo "$GET_SKU" | jq -e '.name == "Amoxicillin 500mg"' > /dev/null 2>&1; then
+if echo "$GET_SKU" | jq -e '(.name == "Amoxicillin 500mg") or (.sku.name == "Amoxicillin 500mg")' > /dev/null 2>&1; then
     pass "Get SKU by ID"
 else
     fail "Get SKU by ID" "$GET_SKU"

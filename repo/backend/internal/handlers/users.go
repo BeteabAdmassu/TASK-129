@@ -25,14 +25,13 @@ func NewUserHandler(repo *repository.Repository) *UserHandler {
 	return &UserHandler{repo: repo}
 }
 
-// validRoles defines the set of allowed user roles.
+// validRoles defines the set of allowed user roles (must match roles table in DB).
 var validRoles = map[string]bool{
-	"admin":            true,
-	"pharmacist":       true,
-	"technician":       true,
-	"maintenance_tech": true,
-	"manager":          true,
-	"staff":            true,
+	"system_admin":         true,
+	"inventory_pharmacist": true,
+	"learning_coordinator": true,
+	"front_desk":           true,
+	"maintenance_tech":     true,
 }
 
 // ListUsers returns all users.
@@ -85,7 +84,7 @@ func (h *UserHandler) CreateUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Validation failed",
 			Code:    http.StatusBadRequest,
-			Details: "Invalid role. Must be one of: admin, pharmacist, technician, maintenance_tech, manager, staff",
+			Details: "Invalid role. Must be one of: system_admin, inventory_pharmacist, learning_coordinator, front_desk, maintenance_tech",
 		})
 	}
 

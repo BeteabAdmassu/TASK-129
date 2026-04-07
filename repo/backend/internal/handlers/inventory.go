@@ -129,7 +129,7 @@ func (h *InventoryHandler) GetSKU(c echo.Context) error {
 	}
 
 	sku, err := h.repo.GetSKUByID(id)
-	if err != nil {
+	if err != nil || sku == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "SKU not found",
 			Code:    http.StatusNotFound,

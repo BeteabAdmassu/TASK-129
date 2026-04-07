@@ -362,6 +362,9 @@ func (h *LearningHandler) CreateKnowledgePoint(c echo.Context) error {
 	if kp.Tags == nil {
 		kp.Tags = []string{}
 	}
+	if kp.Classifications == nil {
+		kp.Classifications = json.RawMessage("{}")
+	}
 
 	if err := h.repo.CreateKnowledgePoint(kp); err != nil {
 		logrus.WithError(err).Error("Failed to create knowledge point")
