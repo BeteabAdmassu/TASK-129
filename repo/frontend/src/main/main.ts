@@ -55,12 +55,24 @@ function getBackendBinary(): string | null {
   return existsSync(candidate) ? candidate : null;
 }
 
-// startEmbeddedDatabase starts a bundled PostgreSQL instance via the
-// optional `embedded-postgres` package (installed at packaging time).
-// Falls back gracefully to an external PostgreSQL if the package is unavailable.
+// startEmbeddedDatabase starts the bundled PostgreSQL instance via the
+// `embedded-postgres` package (required at packaging time).
+// In development mode the package is optional and the dev DATABASE_URL is used instead.
 async function startEmbeddedDatabase(): Promise<string> {
   if (!EmbeddedPostgresClass) {
-    console.warn('[main] embedded-postgres not available — using external database');
+    if (!IS_DEV) {
+      // Packaged build — embedded-postgres must be present; abort rather than silently
+      // connecting to an unanticipated external database.
+      dialog.showErrorBox(
+        'MedOps — startup error',
+        'Embedded database module not found. The installation may be corrupt. Please reinstall MedOps.',
+      );
+      app.quit();
+      // Return is unreachable after quit but satisfies the type-checker.
+      return '';
+    }
+    // Development: allow override via env so `go run` / Docker backends work alongside Electron.
+    console.warn('[main] embedded-postgres not available — dev mode, using DATABASE_URL');
     return process.env.DATABASE_URL ?? 'postgres://medops:medops@localhost:5432/medops';
   }
   embeddedPg = new EmbeddedPostgresClass({

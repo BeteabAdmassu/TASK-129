@@ -1,0 +1,284 @@
+package handlers
+
+// authz_integration_test.go — API-level authorization integration tests (F-010).
+//
+// These tests call the actual HTTP handler functions through an echo.Context,
+// using a stub store so no database is needed. They verify that the handler
+// layer enforces 401 / 403 at the HTTP response level — not just at the
+// predicate level — covering the object-authorization paths identified in F-007.
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/labstack/echo/v4"
+
+	"medops/internal/middleware"
+	"medops/internal/models"
+)
+
+// ─── stub store ──────────────────────────────────────────────────────────────
+
+// stubWorkOrderStore is a minimal in-memory store for testing WorkOrderHandler.
+type stubWorkOrderStore struct {
+	wo *models.WorkOrder
+}
+
+func (s *stubWorkOrderStore) GetWorkOrderByID(_ string) (*models.WorkOrder, error) {
+	return s.wo, nil
+}
+func (s *stubWorkOrderStore) ListWorkOrders(_ string, _ string, _, _ int) ([]models.WorkOrder, int, error) {
+	return nil, 0, nil
+}
+func (s *stubWorkOrderStore) CreateWorkOrder(_ *models.WorkOrder) error   { return nil }
+func (s *stubWorkOrderStore) UpdateWorkOrder(_ *models.WorkOrder) error   { return nil }
+func (s *stubWorkOrderStore) GetTechWithLeastOrders(_ string) (string, error) { return "", nil }
+func (s *stubWorkOrderStore) GetWorkOrderAnalytics() (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+func (s *stubWorkOrderStore) CreateAuditLog(_ *models.AuditLogEntry) error { return nil }
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+// echoCtx builds an echo.Context with the given method/path and sets
+// user_id and user_role in the context (simulating passed JWT middleware).
+func echoCtx(method, path, userID, role string) (echo.Context, *httptest.ResponseRecorder) {
+	e := echo.New()
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set("user_id", userID)
+	c.Set("user_role", role)
+	return c, rec
+}
+
+// ─── GetWorkOrder authz tests ─────────────────────────────────────────────────
+
+// TestGetWorkOrderAPI_Submitter_Gets200 verifies the submitter of a work order
+// receives HTTP 200 from the handler (object-level authz passes).
+func TestGetWorkOrderAPI_Submitter_Gets200(t *testing.T) {
+	submitterID := "uid-submitter"
+	wo := &models.WorkOrder{ID: "wo-001", SubmittedBy: submitterID}
+
+	h := &WorkOrderHandler{repo: &stubWorkOrderStore{wo: wo}}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders/wo-001", submitterID, "front_desk")
+	c.SetParamNames("id")
+	c.SetParamValues("wo-001")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("submitter should get 200; got %d", rec.Code)
+	}
+}
+
+// TestGetWorkOrderAPI_AssignedTech_Gets200 verifies the assigned technician
+// receives HTTP 200.
+func TestGetWorkOrderAPI_AssignedTech_Gets200(t *testing.T) {
+	techID := "uid-tech"
+	wo := &models.WorkOrder{ID: "wo-002", SubmittedBy: "uid-other", AssignedTo: &techID}
+
+	h := &WorkOrderHandler{repo: &stubWorkOrderStore{wo: wo}}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders/wo-002", techID, "maintenance_tech")
+	c.SetParamNames("id")
+	c.SetParamValues("wo-002")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("assigned tech should get 200; got %d", rec.Code)
+	}
+}
+
+// TestGetWorkOrderAPI_SystemAdmin_Gets200 verifies system_admin bypasses
+// object-level checks and always receives HTTP 200.
+func TestGetWorkOrderAPI_SystemAdmin_Gets200(t *testing.T) {
+	wo := &models.WorkOrder{ID: "wo-003", SubmittedBy: "uid-someone-else"}
+
+	h := &WorkOrderHandler{repo: &stubWorkOrderStore{wo: wo}}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders/wo-003", "uid-admin", "system_admin")
+	c.SetParamNames("id")
+	c.SetParamValues("wo-003")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("system_admin should get 200; got %d", rec.Code)
+	}
+}
+
+// TestGetWorkOrderAPI_UnrelatedUser_Gets403 verifies that a user who is neither
+// the submitter, the assignee, nor a privileged role receives HTTP 403.
+func TestGetWorkOrderAPI_UnrelatedUser_Gets403(t *testing.T) {
+	assignee := "uid-tech"
+	wo := &models.WorkOrder{
+		ID:          "wo-004",
+		SubmittedBy: "uid-submitter",
+		AssignedTo:  &assignee,
+	}
+
+	h := &WorkOrderHandler{repo: &stubWorkOrderStore{wo: wo}}
+
+	// "uid-stranger" is not the submitter, not the assignee, not admin/tech
+	c, rec := echoCtx(http.MethodGet, "/work-orders/wo-004", "uid-stranger", "front_desk")
+	c.SetParamNames("id")
+	c.SetParamValues("wo-004")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("unrelated user should get 403; got %d", rec.Code)
+	}
+}
+
+// TestGetWorkOrderAPI_LearningCoordinator_Gets403 verifies that a
+// learning_coordinator role (no work-order privileges) is denied access to
+// another user's work order.
+func TestGetWorkOrderAPI_LearningCoordinator_Gets403(t *testing.T) {
+	wo := &models.WorkOrder{ID: "wo-005", SubmittedBy: "uid-other"}
+
+	h := &WorkOrderHandler{repo: &stubWorkOrderStore{wo: wo}}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders/wo-005", "uid-lc", "learning_coordinator")
+	c.SetParamNames("id")
+	c.SetParamValues("wo-005")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("learning_coordinator should get 403; got %d", rec.Code)
+	}
+}
+
+// TestGetWorkOrderAPI_NotFound_Gets404 verifies that a non-existent work order
+// ID causes the handler to return 404 rather than panic or 500.
+func TestGetWorkOrderAPI_NotFound_Gets404(t *testing.T) {
+	// Store returns nil — simulates no matching row.
+	h := &WorkOrderHandler{repo: &stubWorkOrderStore{wo: nil}}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders/missing", "uid-admin", "system_admin")
+	c.SetParamNames("id")
+	c.SetParamValues("missing")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing work order should get 404; got %d", rec.Code)
+	}
+}
+
+// ─── JWT middleware authz tests ───────────────────────────────────────────────
+
+// TestJWTMiddleware_NoToken_Returns401 verifies the JWT middleware rejects
+// requests that carry no Authorization header with HTTP 401.
+func TestJWTMiddleware_NoToken_Returns401(t *testing.T) {
+	e := echo.New()
+	e.GET("/protected", func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	}, middleware.JWTAuth("test-secret"))
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("no token should yield 401; got %d", rec.Code)
+	}
+}
+
+// TestJWTMiddleware_InvalidToken_Returns401 verifies the middleware rejects
+// a malformed token with HTTP 401.
+func TestJWTMiddleware_InvalidToken_Returns401(t *testing.T) {
+	e := echo.New()
+	e.GET("/protected", func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	}, middleware.JWTAuth("test-secret"))
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer not-a-real-token")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("invalid token should yield 401; got %d", rec.Code)
+	}
+}
+
+// TestJWTMiddleware_ValidToken_Passes verifies the middleware allows a correctly
+// signed JWT through and populates user_id / user_role in the context.
+func TestJWTMiddleware_ValidToken_Passes(t *testing.T) {
+	const secret = "test-secret-32-chars-long-enough!"
+	token, err := middleware.GenerateToken("uid-1", "system_admin", secret)
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+
+	e := echo.New()
+	var capturedRole string
+	e.GET("/protected", func(c echo.Context) error {
+		capturedRole = middleware.GetUserRole(c)
+		return c.String(http.StatusOK, "ok")
+	}, middleware.JWTAuth(secret))
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("valid token should yield 200; got %d", rec.Code)
+	}
+	if capturedRole != "system_admin" {
+		t.Errorf("expected role system_admin in context, got %q", capturedRole)
+	}
+}
+
+// TestRoleMiddleware_WrongRole_Returns403 verifies the role-enforcement
+// middleware rejects users whose role is not in the allowed set with 403.
+func TestRoleMiddleware_WrongRole_Returns403(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/admin-only", nil)
+	rec := httptest.NewRecorder()
+	e := echo.New()
+	c := e.NewContext(req, rec)
+	c.Set("user_role", "front_desk") // simulate authenticated non-admin
+
+	handler := middleware.RequireRole("system_admin")(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("wrong role should yield 403; got %d", rec.Code)
+	}
+}
+
+// TestRoleMiddleware_CorrectRole_Passes verifies that a user with the required
+// role is allowed through the role-enforcement middleware.
+func TestRoleMiddleware_CorrectRole_Passes(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/admin-only", nil)
+	rec := httptest.NewRecorder()
+	e := echo.New()
+	c := e.NewContext(req, rec)
+	c.Set("user_role", "system_admin")
+
+	handler := middleware.RequireRole("system_admin")(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("correct role should yield 200; got %d", rec.Code)
+	}
+}

@@ -6,3 +6,4 @@ ALTER TABLE knowledge_points    DROP COLUMN IF EXISTS tenant_id;
 ALTER TABLE member_transactions DROP COLUMN IF EXISTS tenant_id;
 ALTER TABLE rate_tables         DROP COLUMN IF EXISTS tenant_id;
 ALTER TABLE charge_statements   DROP COLUMN IF EXISTS tenant_id;
+ALTER TABLE managed_files       DROP COLUMN IF EXISTS tenant_id;

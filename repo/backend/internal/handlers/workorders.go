@@ -15,9 +15,21 @@ import (
 	"medops/internal/repository"
 )
 
+// workOrderStore is the subset of repository.Repository used by WorkOrderHandler.
+// The interface enables unit testing without a real database.
+type workOrderStore interface {
+	GetWorkOrderByID(id string) (*models.WorkOrder, error)
+	ListWorkOrders(status string, assignedTo string, page, pageSize int) ([]models.WorkOrder, int, error)
+	CreateWorkOrder(wo *models.WorkOrder) error
+	UpdateWorkOrder(wo *models.WorkOrder) error
+	GetTechWithLeastOrders(trade string) (string, error)
+	GetWorkOrderAnalytics() (map[string]interface{}, error)
+	CreateAuditLog(entry *models.AuditLogEntry) error
+}
+
 // WorkOrderHandler handles work order management requests.
 type WorkOrderHandler struct {
-	repo *repository.Repository
+	repo workOrderStore
 }
 
 // NewWorkOrderHandler creates a new WorkOrderHandler.
@@ -221,7 +233,7 @@ func (h *WorkOrderHandler) GetWorkOrder(c echo.Context) error {
 	}
 
 	wo, err := h.repo.GetWorkOrderByID(id)
-	if err != nil {
+	if err != nil || wo == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Work order not found",
 			Code:    http.StatusNotFound,
@@ -253,7 +265,7 @@ func (h *WorkOrderHandler) UpdateWorkOrder(c echo.Context) error {
 	}
 
 	wo, err := h.repo.GetWorkOrderByID(id)
-	if err != nil {
+	if err != nil || wo == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Work order not found",
 			Code:    http.StatusNotFound,
@@ -335,7 +347,7 @@ func (h *WorkOrderHandler) CloseWorkOrder(c echo.Context) error {
 	}
 
 	wo, err := h.repo.GetWorkOrderByID(id)
-	if err != nil {
+	if err != nil || wo == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Work order not found",
 			Code:    http.StatusNotFound,
@@ -406,7 +418,7 @@ func (h *WorkOrderHandler) RateWorkOrder(c echo.Context) error {
 	}
 
 	wo, err := h.repo.GetWorkOrderByID(id)
-	if err != nil {
+	if err != nil || wo == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Work order not found",
 			Code:    http.StatusNotFound,

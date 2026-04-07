@@ -764,9 +764,9 @@ func (r *Repository) ListWorkOrders(status string, assignedTo string, page, page
 
 	query := `SELECT id, submitted_by, assigned_to, trade, priority, sla_deadline, status, description, location, parts_cost, labor_cost, rating, closed_at, created_at,
 	                 COUNT(*) OVER() AS total
-	          FROM work_orders WHERE 1=1`
-	var args []interface{}
-	argIdx := 1
+	          FROM work_orders WHERE tenant_id = $1`
+	args := []interface{}{r.tenantID}
+	argIdx := 2
 
 	if status != "" {
 		query += fmt.Sprintf(" AND status = $%d", argIdx)
@@ -805,7 +805,7 @@ func (r *Repository) GetWorkOrder(id string) (*models.WorkOrder, error) {
 	wo := &models.WorkOrder{}
 	err := r.DB.QueryRow(
 		`SELECT id, submitted_by, assigned_to, trade, priority, sla_deadline, status, description, location, parts_cost, labor_cost, rating, closed_at, created_at
-		 FROM work_orders WHERE id = $1`, id,
+		 FROM work_orders WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
 	).Scan(&wo.ID, &wo.SubmittedBy, &wo.AssignedTo, &wo.Trade, &wo.Priority, &wo.SLADeadline, &wo.Status, &wo.Description, &wo.Location, &wo.PartsCost, &wo.LaborCost, &wo.Rating, &wo.ClosedAt, &wo.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -823,9 +823,9 @@ func (r *Repository) CreateWorkOrder(wo *models.WorkOrder) error {
 	}
 	wo.CreatedAt = time.Now()
 	_, err := r.DB.Exec(
-		`INSERT INTO work_orders (id, submitted_by, assigned_to, trade, priority, sla_deadline, status, description, location, parts_cost, labor_cost, rating, closed_at, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-		wo.ID, wo.SubmittedBy, wo.AssignedTo, wo.Trade, wo.Priority, wo.SLADeadline, wo.Status, wo.Description, wo.Location, wo.PartsCost, wo.LaborCost, wo.Rating, wo.ClosedAt, wo.CreatedAt,
+		`INSERT INTO work_orders (id, submitted_by, assigned_to, trade, priority, sla_deadline, status, description, location, parts_cost, labor_cost, rating, closed_at, created_at, tenant_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		wo.ID, wo.SubmittedBy, wo.AssignedTo, wo.Trade, wo.Priority, wo.SLADeadline, wo.Status, wo.Description, wo.Location, wo.PartsCost, wo.LaborCost, wo.Rating, wo.ClosedAt, wo.CreatedAt, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("create work order: %w", err)
@@ -837,8 +837,8 @@ func (r *Repository) CreateWorkOrder(wo *models.WorkOrder) error {
 func (r *Repository) UpdateWorkOrder(wo *models.WorkOrder) error {
 	_, err := r.DB.Exec(
 		`UPDATE work_orders SET assigned_to=$1, trade=$2, priority=$3, sla_deadline=$4, status=$5, description=$6, location=$7, parts_cost=$8, labor_cost=$9, rating=$10, closed_at=$11
-		 WHERE id=$12`,
-		wo.AssignedTo, wo.Trade, wo.Priority, wo.SLADeadline, wo.Status, wo.Description, wo.Location, wo.PartsCost, wo.LaborCost, wo.Rating, wo.ClosedAt, wo.ID,
+		 WHERE id=$12 AND tenant_id=$13`,
+		wo.AssignedTo, wo.Trade, wo.Priority, wo.SLADeadline, wo.Status, wo.Description, wo.Location, wo.PartsCost, wo.LaborCost, wo.Rating, wo.ClosedAt, wo.ID, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("update work order: %w", err)
@@ -847,6 +847,7 @@ func (r *Repository) UpdateWorkOrder(wo *models.WorkOrder) error {
 }
 
 // GetTechnicianWithLeastOrders finds the active technician with the fewest open/in-progress orders for auto-dispatch.
+// Only work orders belonging to the current tenant are counted so cross-tenant workload does not affect selection.
 func (r *Repository) GetTechnicianWithLeastOrders(trade string) (*models.User, error) {
 	u := &models.User{}
 	err := r.DB.QueryRow(
@@ -856,8 +857,9 @@ func (r *Repository) GetTechnicianWithLeastOrders(trade string) (*models.User, e
 		 ORDER BY (
 		   SELECT COUNT(*) FROM work_orders wo
 		   WHERE wo.assigned_to = u.id AND wo.status IN ('open', 'in_progress')
+		     AND wo.tenant_id = $1
 		 ) ASC
-		 LIMIT 1`,
+		 LIMIT 1`, r.tenantID,
 	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -868,12 +870,14 @@ func (r *Repository) GetTechnicianWithLeastOrders(trade string) (*models.User, e
 	return u, nil
 }
 
-// GetWorkOrderAnalytics returns basic work order statistics.
+// GetWorkOrderAnalytics returns basic work order statistics scoped to the current tenant.
 func (r *Repository) GetWorkOrderAnalytics() (map[string]interface{}, error) {
 	analytics := make(map[string]interface{})
 
-	// Count by status
-	rows, err := r.DB.Query(`SELECT status, COUNT(*) FROM work_orders GROUP BY status`)
+	// Count by status (tenant-scoped)
+	rows, err := r.DB.Query(
+		`SELECT status, COUNT(*) FROM work_orders WHERE tenant_id = $1 GROUP BY status`, r.tenantID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("work order analytics by_status: %w", err)
 	}
@@ -893,11 +897,11 @@ func (r *Repository) GetWorkOrderAnalytics() (map[string]interface{}, error) {
 	}
 	analytics["by_status"] = statusCounts
 
-	// Average resolution time (hours) for closed orders
+	// Average resolution time (hours) for closed orders (tenant-scoped)
 	var avgHours sql.NullFloat64
 	err = r.DB.QueryRow(
 		`SELECT AVG(EXTRACT(EPOCH FROM (closed_at - created_at)) / 3600)
-		 FROM work_orders WHERE status = 'closed' AND closed_at IS NOT NULL`,
+		 FROM work_orders WHERE tenant_id = $1 AND status = 'closed' AND closed_at IS NOT NULL`, r.tenantID,
 	).Scan(&avgHours)
 	if err != nil {
 		return nil, fmt.Errorf("work order analytics avg_resolution: %w", err)
@@ -908,10 +912,11 @@ func (r *Repository) GetWorkOrderAnalytics() (map[string]interface{}, error) {
 		analytics["avg_resolution_hours"] = 0
 	}
 
-	// Total costs for closed orders
+	// Total costs for closed orders (tenant-scoped)
 	var totalParts, totalLabor sql.NullFloat64
 	err = r.DB.QueryRow(
-		`SELECT COALESCE(SUM(parts_cost), 0), COALESCE(SUM(labor_cost), 0) FROM work_orders WHERE status = 'closed'`,
+		`SELECT COALESCE(SUM(parts_cost), 0), COALESCE(SUM(labor_cost), 0)
+		 FROM work_orders WHERE tenant_id = $1 AND status = 'closed'`, r.tenantID,
 	).Scan(&totalParts, &totalLabor)
 	if err != nil {
 		return nil, fmt.Errorf("work order analytics costs: %w", err)
@@ -919,9 +924,11 @@ func (r *Repository) GetWorkOrderAnalytics() (map[string]interface{}, error) {
 	analytics["total_parts_cost"] = totalParts.Float64
 	analytics["total_labor_cost"] = totalLabor.Float64
 
-	// Average rating
+	// Average rating (tenant-scoped)
 	var avgRating sql.NullFloat64
-	err = r.DB.QueryRow(`SELECT AVG(rating) FROM work_orders WHERE rating IS NOT NULL`).Scan(&avgRating)
+	err = r.DB.QueryRow(
+		`SELECT AVG(rating) FROM work_orders WHERE tenant_id = $1 AND rating IS NOT NULL`, r.tenantID,
+	).Scan(&avgRating)
 	if err != nil {
 		return nil, fmt.Errorf("work order analytics avg_rating: %w", err)
 	}
@@ -1335,7 +1342,7 @@ func (r *Repository) GetFileByHash(sha256 string) (*models.ManagedFile, error) {
 	f := &models.ManagedFile{}
 	err := r.DB.QueryRow(
 		`SELECT id, sha256, original_name, mime_type, size_bytes, storage_path, uploaded_by, retention_until, created_at
-		 FROM managed_files WHERE sha256 = $1`, sha256,
+		 FROM managed_files WHERE sha256 = $1 AND tenant_id = $2`, sha256, r.tenantID,
 	).Scan(&f.ID, &f.SHA256, &f.OriginalName, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.UploadedBy, &f.RetentionUntil, &f.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -1353,9 +1360,9 @@ func (r *Repository) CreateFile(f *models.ManagedFile) error {
 	}
 	f.CreatedAt = time.Now()
 	_, err := r.DB.Exec(
-		`INSERT INTO managed_files (id, sha256, original_name, mime_type, size_bytes, storage_path, uploaded_by, retention_until, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		f.ID, f.SHA256, f.OriginalName, f.MimeType, f.SizeBytes, f.StoragePath, f.UploadedBy, f.RetentionUntil, f.CreatedAt,
+		`INSERT INTO managed_files (id, sha256, original_name, mime_type, size_bytes, storage_path, uploaded_by, retention_until, created_at, tenant_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		f.ID, f.SHA256, f.OriginalName, f.MimeType, f.SizeBytes, f.StoragePath, f.UploadedBy, f.RetentionUntil, f.CreatedAt, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("create file: %w", err)
@@ -1368,7 +1375,7 @@ func (r *Repository) GetFile(id string) (*models.ManagedFile, error) {
 	f := &models.ManagedFile{}
 	err := r.DB.QueryRow(
 		`SELECT id, sha256, original_name, mime_type, size_bytes, storage_path, uploaded_by, retention_until, created_at
-		 FROM managed_files WHERE id = $1`, id,
+		 FROM managed_files WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
 	).Scan(&f.ID, &f.SHA256, &f.OriginalName, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.UploadedBy, &f.RetentionUntil, &f.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -1597,7 +1604,7 @@ func (r *Repository) GetFilesByIDs(ids []string) ([]models.ManagedFile, error) {
 	}
 	rows, err := r.DB.Query(
 		`SELECT id, sha256, original_name, mime_type, size_bytes, storage_path, uploaded_by, retention_until, created_at
-		 FROM managed_files WHERE id = ANY($1)`, pq.Array(ids),
+		 FROM managed_files WHERE id = ANY($1) AND tenant_id = $2`, pq.Array(ids), r.tenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get files by ids: %w", err)
