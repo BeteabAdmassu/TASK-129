@@ -5,6 +5,7 @@ fix.md
 
 # Evaluator output
 .tmp/
+.claude/
 
 # Env
 .env

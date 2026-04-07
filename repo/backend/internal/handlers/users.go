@@ -46,9 +46,10 @@ func (h *UserHandler) ListUsers(c echo.Context) error {
 		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"data": users,
-	})
+	if users == nil {
+		users = []models.User{}
+	}
+	return c.JSON(http.StatusOK, users)
 }
 
 // CreateUser creates a new user account.
