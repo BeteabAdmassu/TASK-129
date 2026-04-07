@@ -8,6 +8,7 @@ import ErrorMessage from '../common/ErrorMessage';
 import EmptyState from '../common/EmptyState';
 import DataTable from '../common/DataTable';
 import Pagination from '../common/Pagination';
+import ContextMenu from '../common/ContextMenu';
 
 const REASON_CODES_IN = ['purchase_order', 'return', 'adjustment', 'donation', 'transfer_in'];
 const REASON_CODES_OUT = ['dispensed', 'expired', 'damaged', 'adjustment', 'transfer_out'];
@@ -59,6 +60,7 @@ const SKUDetailPage: React.FC = () => {
   const batches: InventoryBatch[] = Array.isArray(batchesData) ? batchesData : (batchesData as any)?.data || [];
 
   // Fetch transactions
+  const [batchCtxMenu, setBatchCtxMenu] = useState<{ x: number; y: number; batch: InventoryBatch } | null>(null);
   const [txPage, setTxPage] = useState(1);
   const txPageSize = 15;
   const { data: txData, loading: txLoading, error: txError, refetch: refetchTx } = useFetch<PaginatedResponse<StockTransaction>>(
@@ -262,9 +264,33 @@ const SKUDetailPage: React.FC = () => {
           <EmptyState message="No batches found for this SKU" />
         )}
         {!batchesLoading && !batchesError && batches.length > 0 && (
-          <DataTable columns={batchColumns} data={batches} />
+          <DataTable columns={batchColumns} data={batches}
+            onContextMenu={(batch, e) => setBatchCtxMenu({ x: e.clientX, y: e.clientY, batch })}
+          />
         )}
       </div>
+
+      {/* Batch context menu */}
+      {batchCtxMenu && (
+        <ContextMenu
+          x={batchCtxMenu.x}
+          y={batchCtxMenu.y}
+          onClose={() => setBatchCtxMenu(null)}
+          items={[
+            {
+              label: 'Dispense from this Batch',
+              onClick: () => {
+                setDispenseForm((f) => ({ ...f, batch_id: batchCtxMenu.batch.id }));
+                setBatchCtxMenu(null);
+              },
+            },
+            {
+              label: `Expires: ${batchCtxMenu.batch.expiration_date ? new Date(batchCtxMenu.batch.expiration_date).toLocaleDateString() : 'N/A'}`,
+              onClick: () => setBatchCtxMenu(null),
+            },
+          ]}
+        />
+      )}
 
       {/* Forms side by side */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>

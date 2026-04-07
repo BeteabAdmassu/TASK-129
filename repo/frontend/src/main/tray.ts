@@ -14,6 +14,8 @@ import { join } from 'path';
 
 type TrayOptions = {
   icon: Electron.NativeImage;
+  backendUrl: string;
+  getAuthToken: () => Promise<string>;
   onOpen: () => void;
   onLock: () => void;
   onNewWindow: () => void;
@@ -24,6 +26,7 @@ type TrayOptions = {
 let tray: Tray | null = null;
 let reminderInterval: ReturnType<typeof setInterval> | null = null;
 let dailyReminderTimer: ReturnType<typeof setTimeout> | null = null;
+let membershipReminderTimer: ReturnType<typeof setTimeout> | null = null;
 let reminderMinutes = 0; // 0 = off
 
 // ─── Persistent state ─────────────────────────────────────────────────────────
@@ -34,6 +37,7 @@ function statePath(): string {
 
 interface TrayState {
   lastBackupReminderDate: string | null; // ISO date string YYYY-MM-DD
+  lastMembershipReminderDate: string | null;
 }
 
 function loadState(): TrayState {
@@ -44,7 +48,7 @@ function loadState(): TrayState {
   } catch {
     // Corrupt file — start fresh
   }
-  return { lastBackupReminderDate: null };
+  return { lastBackupReminderDate: null, lastMembershipReminderDate: null };
 }
 
 function saveState(state: TrayState): void {
@@ -73,6 +77,9 @@ export function setupTray(opts: TrayOptions): void {
 
   // Schedule once-per-day backup reminder.
   scheduleDailyBackupReminder(opts);
+
+  // Schedule membership expiry and low-stock checks.
+  scheduleMembershipReminders(opts);
 }
 
 /** Tear down the tray on app quit. */
@@ -81,6 +88,10 @@ export function cleanupTray(): void {
   if (dailyReminderTimer !== null) {
     clearTimeout(dailyReminderTimer);
     dailyReminderTimer = null;
+  }
+  if (membershipReminderTimer !== null) {
+    clearTimeout(membershipReminderTimer);
+    membershipReminderTimer = null;
   }
   tray?.destroy();
   tray = null;
@@ -221,6 +232,82 @@ function scheduleNextMidnight(opts: TrayOptions): void {
   dailyReminderTimer = setTimeout(() => {
     fireDailyBackupReminder(opts);
   }, msUntilMidnight);
+}
+
+// ─── Membership / low-stock reminder ──────────────────────────────────────────
+
+function scheduleMembershipReminders(opts: TrayOptions): void {
+  // Fire 60 seconds after startup, then every 24 hours.
+  membershipReminderTimer = setTimeout(async () => {
+    await checkMembershipAndStock(opts);
+    // Reschedule every 24 hours.
+    membershipReminderTimer = setInterval(async () => {
+      await checkMembershipAndStock(opts);
+    }, 24 * 60 * 60 * 1000) as unknown as ReturnType<typeof setTimeout>;
+  }, 60_000);
+}
+
+async function checkMembershipAndStock(opts: TrayOptions): Promise<void> {
+  try {
+    const token = await opts.getAuthToken();
+    const authHeader = { Authorization: `Bearer ${token}` };
+
+    // Check members expiring soon.
+    const membersResp = await fetch(
+      `${opts.backendUrl}/api/v1/members?page=1&page_size=100`,
+      { headers: authHeader },
+    );
+    if (membersResp.ok) {
+      const payload = await membersResp.json();
+      const members: Array<{ name: string; expires_at: string }> = payload.data ?? [];
+      const now = Date.now();
+      for (const m of members) {
+        const expiresMs = new Date(m.expires_at).getTime();
+        const daysLeft = (expiresMs - now) / (1000 * 60 * 60 * 24);
+        if (daysLeft < 0) continue; // already expired — skip
+        if (daysLeft <= 1) {
+          fireNotification(
+            'URGENT: Membership Expiring Today',
+            `URGENT: Member ${m.name} expires today!`,
+            opts.onOpen,
+          );
+        } else if (daysLeft <= 7) {
+          const n = Math.ceil(daysLeft);
+          fireNotification(
+            'Membership Expiry Warning',
+            `Member ${m.name} membership expires in ${n} days`,
+            opts.onOpen,
+          );
+        } else if (daysLeft <= 14) {
+          const n = Math.ceil(daysLeft);
+          fireNotification(
+            'Membership Expiry Reminder',
+            `Reminder: Member ${m.name} membership expires in ${n} days`,
+            opts.onOpen,
+          );
+        }
+      }
+    }
+
+    // Check low-stock SKUs.
+    const stockResp = await fetch(
+      `${opts.backendUrl}/api/v1/skus/low-stock`,
+      { headers: authHeader },
+    );
+    if (stockResp.ok) {
+      const stockPayload = await stockResp.json();
+      const items: unknown[] = stockPayload.data ?? stockPayload ?? [];
+      if (Array.isArray(items) && items.length > 0) {
+        fireNotification(
+          'Low Stock Alert',
+          `${items.length} SKU(s) are below low-stock threshold`,
+          opts.onOpen,
+        );
+      }
+    }
+  } catch {
+    // Non-fatal — silently ignore errors
+  }
 }
 
 // ─── Notification helper ───────────────────────────────────────────────────────

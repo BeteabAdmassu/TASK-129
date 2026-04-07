@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { chargesAPI } from '../../services/api';
-import type { ChargeStatement, ChargeLineItem } from '../../types';
+import type { ChargeStatement, ChargeLineItem, User } from '../../types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorMessage from '../common/ErrorMessage';
 import EmptyState from '../common/EmptyState';
 import DataTable from '../common/DataTable';
 import Modal from '../common/Modal';
+import ContextMenu from '../common/ContextMenu';
 
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '0.5rem', border: '1px solid #ccc', borderRadius: 4, fontSize: '0.9rem', boxSizing: 'border-box',
@@ -24,18 +25,25 @@ const successStyle: React.CSSProperties = {
   padding: '0.5rem 1rem', backgroundColor: '#d4edda', border: '1px solid #c3e6cb', borderRadius: 4, color: '#155724', marginBottom: '1rem',
 };
 
-/** Canonical statement lifecycle: pending → approved → paid */
+/** Canonical statement lifecycle: pending → reconciled → approved → paid */
 const statusColors: Record<string, { bg: string; color: string }> = {
-  pending:  { bg: '#cce5ff', color: '#004085' },
-  approved: { bg: '#d4edda', color: '#155724' },
-  paid:     { bg: '#d1ecf1', color: '#0c5460' },
+  pending:    { bg: '#cce5ff', color: '#004085' },
+  reconciled: { bg: '#fff3cd', color: '#856404' },
+  approved:   { bg: '#d4edda', color: '#155724' },
+  paid:       { bg: '#d1ecf1', color: '#0c5460' },
 };
 
 const StatementsPage: React.FC = () => {
+  // Current user (for approver distinctness check)
+  const currentUser: User | null = (() => {
+    try { return JSON.parse(localStorage.getItem('medops_user') || 'null'); } catch { return null; }
+  })();
+
   // List state
   const [statements, setStatements] = useState<ChargeStatement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; stmt: ChargeStatement } | null>(null);
 
   const fetchStatements = async () => {
     setLoading(true);
@@ -125,7 +133,7 @@ const StatementsPage: React.FC = () => {
     }
   };
 
-  // Reconcile (pending → approved)
+  // Reconcile (pending → reconciled)
   const handleReconcile = async () => {
     if (!selectedStatement) return;
     const expectedNum = parseFloat(reconcileExpected);
@@ -145,7 +153,7 @@ const StatementsPage: React.FC = () => {
         expected_total: expectedNum,
         variance_notes: reconcileNotes.trim() || undefined,
       });
-      showSuccess('Statement reconciled and approved');
+      showSuccess('Statement reconciled — awaiting second-step approval');
       setShowReconcile(false);
       setReconcileExpected('');
       setReconcileNotes('');
@@ -155,6 +163,24 @@ const StatementsPage: React.FC = () => {
       fetchStatements();
     } catch (e: any) {
       setReconcileErr(e.response?.data?.error || 'Reconciliation failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Approve (reconciled → approved), only if different user from reconciler
+  const handleApprove = async () => {
+    if (!selectedStatement) return;
+    setActionLoading(true);
+    try {
+      await chargesAPI.approve(selectedStatement.id);
+      showSuccess('Statement approved');
+      const r = await chargesAPI.getStatement(selectedStatement.id);
+      const d = r.data;
+      setSelectedStatement(d.statement || d);
+      fetchStatements();
+    } catch (e: any) {
+      setError(e.response?.data?.error || 'Approval failed');
     } finally {
       setActionLoading(false);
     }
@@ -226,6 +252,28 @@ const StatementsPage: React.FC = () => {
           columns={columns}
           data={statements}
           onRowClick={viewDetail}
+          onContextMenu={(stmt, e) => setCtxMenu({ x: e.clientX, y: e.clientY, stmt })}
+        />
+      )}
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={[
+            { label: 'View Details', onClick: () => { viewDetail(ctxMenu.stmt); setCtxMenu(null); } },
+            ...(ctxMenu.stmt.status === 'pending'
+              ? [{ label: 'Reconcile', onClick: () => { viewDetail(ctxMenu.stmt); setShowReconcile(true); setCtxMenu(null); } }]
+              : []),
+            ...(ctxMenu.stmt.status === 'reconciled'
+              ? [{ label: 'Approve', onClick: () => { handleApprove(ctxMenu.stmt.id); setCtxMenu(null); } }]
+              : []),
+            ...(ctxMenu.stmt.status === 'approved'
+              ? [{ label: 'Export / Mark Paid', onClick: () => { handleExport(ctxMenu.stmt.id); setCtxMenu(null); } }]
+              : []),
+          ]}
         />
       )}
 
@@ -255,7 +303,9 @@ const StatementsPage: React.FC = () => {
                   <div><span style={{ fontWeight: 500, color: '#666' }}>Expected Total:</span> ${selectedStatement.expected_total.toFixed(2)}</div>
                 )}
                 <div><span style={{ fontWeight: 500, color: '#666' }}>Created:</span> {new Date(selectedStatement.created_at).toLocaleString()}</div>
-                {selectedStatement.approved_by && <div><span style={{ fontWeight: 500, color: '#666' }}>Approved By:</span> {selectedStatement.approved_by}</div>}
+                {selectedStatement.reconciled_at && <div><span style={{ fontWeight: 500, color: '#666' }}>Reconciled At:</span> {new Date(selectedStatement.reconciled_at).toLocaleString()}</div>}
+                {selectedStatement.approved_by_1 && <div><span style={{ fontWeight: 500, color: '#666' }}>Reconciled By:</span> {selectedStatement.approved_by_1}</div>}
+                {selectedStatement.approved_by_2 && <div><span style={{ fontWeight: 500, color: '#666' }}>Approved By:</span> {selectedStatement.approved_by_2}</div>}
                 {selectedStatement.variance_notes && <div style={{ gridColumn: '1 / -1' }}><span style={{ fontWeight: 500, color: '#666' }}>Variance Notes:</span> {selectedStatement.variance_notes}</div>}
                 {selectedStatement.paid_at && <div><span style={{ fontWeight: 500, color: '#666' }}>Paid At:</span> {new Date(selectedStatement.paid_at).toLocaleString()}</div>}
               </div>
@@ -273,8 +323,17 @@ const StatementsPage: React.FC = () => {
                 {/* Reconcile: only available from pending */}
                 {selectedStatement.status === 'pending' && (
                   <button onClick={() => setShowReconcile(true)} style={btnWarning} disabled={actionLoading}>
-                    Reconcile &amp; Approve
+                    Reconcile
                   </button>
+                )}
+                {/* Approve: only available from reconciled, and only if the current user is not the reconciler */}
+                {selectedStatement.status === 'reconciled' && currentUser && selectedStatement.approved_by_1 !== currentUser.id && (
+                  <button onClick={handleApprove} style={btnPrimary} disabled={actionLoading}>
+                    {actionLoading ? 'Approving...' : 'Approve'}
+                  </button>
+                )}
+                {selectedStatement.status === 'reconciled' && currentUser && selectedStatement.approved_by_1 === currentUser.id && (
+                  <span style={{ color: '#856404', fontSize: '0.9rem', alignSelf: 'center' }}>Awaiting approval by a different user</span>
                 )}
                 {/* Export CSV: only available from approved */}
                 {selectedStatement.status === 'approved' && (

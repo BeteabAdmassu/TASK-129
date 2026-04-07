@@ -92,8 +92,17 @@ func main() {
 	// Global middleware
 	e.Use(echomw.Recover())
 	e.Use(middleware.RequestLogger())
+	// CORS: restricted to localhost origins for offline desktop deployment.
+	// Electron renderer uses file:// or localhost; no external origins are trusted.
 	e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
-		AllowOrigins: []string{"*"},
+		AllowOrigins: []string{
+			"http://localhost",
+			"http://localhost:3000",
+			"http://localhost:8080",
+			"http://127.0.0.1",
+			"http://127.0.0.1:3000",
+			"http://127.0.0.1:8080",
+		},
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))

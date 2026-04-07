@@ -206,7 +206,10 @@ function createWindow(options: { url?: string; title?: string } = {}): BrowserWi
     show: false, // shown after 'ready-to-show'
   });
 
-  const url = options.url ?? (IS_DEV ? `${BACKEND_URL}` : join(__dirname, '..', 'dist', 'index.html'));
+  // In dev mode load the Vite dev server (port 3000) so hot-reload works.
+  // In packaged/production mode serve the pre-built SPA from dist/.
+  const VITE_DEV_URL = process.env.VITE_DEV_URL ?? 'http://localhost:3000';
+  const url = options.url ?? (IS_DEV ? VITE_DEV_URL : join(__dirname, '..', 'dist', 'index.html'));
 
   if (IS_DEV || url.startsWith('http')) {
     win.loadURL(url);
@@ -301,6 +304,20 @@ app.whenReady().then(async () => {
 
   setupTray({
     icon: createAppIcon(),
+    backendUrl: BACKEND_URL,
+    getAuthToken: async () => {
+      try {
+        const win = mainWindow;
+        if (win && !win.isDestroyed()) {
+          return (await win.webContents.executeJavaScript(
+            `localStorage.getItem('medops_token') ?? ''`,
+          )) as string;
+        }
+      } catch {
+        // window not ready
+      }
+      return '';
+    },
     onOpen: () => {
       if (mainWindow) {
         mainWindow.show();
@@ -317,18 +334,33 @@ app.whenReady().then(async () => {
       }
     },
     onNewWindow: () => createWindow(),
-    onBackup: () => {
-      // Trigger backup via the API and notify the user of success/failure.
+    onBackup: async () => {
+      let token = '';
+      try {
+        const win = mainWindow;
+        if (win && !win.isDestroyed()) {
+          token = (await win.webContents.executeJavaScript(
+            `localStorage.getItem('medops_token') ?? ''`,
+          )) as string;
+        }
+      } catch {
+        // window not ready — proceed without token; backend will return 401
+      }
       fetch(`${BACKEND_URL}/api/v1/system/backup`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${global.__medopsToken ?? ''}` },
+        headers: { Authorization: `Bearer ${token}` },
       })
         .then((r) => {
-          const msg = r.ok ? 'Backup completed successfully.' : 'Backup failed — check the console logs.';
+          const msg = r.ok
+            ? 'Backup completed successfully.'
+            : 'Backup failed — check the console logs.';
           new Notification({ title: 'MedOps Backup', body: msg }).show();
         })
         .catch(() => {
-          new Notification({ title: 'MedOps Backup', body: 'Backup request failed — backend may be offline.' }).show();
+          new Notification({
+            title: 'MedOps Backup',
+            body: 'Backup request failed — backend may be offline.',
+          }).show();
         });
     },
     onQuit: () => app.quit(),

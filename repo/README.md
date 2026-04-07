@@ -208,15 +208,29 @@ npm run dist:win
 
 ### Running the desktop app in development mode
 
-```bash
-# Start PostgreSQL and backend via Docker (or run manually)
-docker compose up -d db backend
+Two terminals are required — one for the Vite renderer dev server, one for the Electron shell.
 
-# Launch Electron dev mode (connects to the running backend)
+**Terminal 1 — Vite renderer dev server (port 3000):**
+```bash
 cd frontend
 npm install
+npm run dev
+```
+
+**Terminal 2 — Electron shell + backend (once Terminal 1 is ready):**
+```bash
+# Start PostgreSQL and backend via Docker
+docker compose up -d db backend
+
+# Start Electron (connects to Vite dev server on localhost:3000)
+cd frontend
 npm run electron:dev
 ```
+
+> `npm run electron:dev` builds the Electron main/preload scripts then launches
+> Electron. In dev mode the renderer window loads `http://localhost:3000` (Vite)
+> so hot-module reload works. Set `VITE_DEV_URL` env var to override the default
+> dev server address.
 
 ### Desktop features
 

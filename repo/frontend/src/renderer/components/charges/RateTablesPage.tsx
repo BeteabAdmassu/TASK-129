@@ -6,6 +6,7 @@ import ErrorMessage from '../common/ErrorMessage';
 import EmptyState from '../common/EmptyState';
 import DataTable from '../common/DataTable';
 import Modal from '../common/Modal';
+import ContextMenu from '../common/ContextMenu';
 
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '0.5rem', border: '1px solid #ccc', borderRadius: 4, fontSize: '0.9rem', boxSizing: 'border-box',
@@ -28,6 +29,7 @@ const RateTablesPage: React.FC = () => {
   const [rateTables, setRateTables] = useState<RateTable[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; rt: RateTable } | null>(null);
 
   const fetchRateTables = async () => {
     setLoading(true);
@@ -176,6 +178,7 @@ const RateTablesPage: React.FC = () => {
             columns={columns}
             data={rateTables}
             onRowClick={(rt) => setExpandedId(expandedId === rt.id ? null : rt.id)}
+            onContextMenu={(rt, e) => setCtxMenu({ x: e.clientX, y: e.clientY, rt })}
           />
           {expandedId && rateTables.find(rt => rt.id === expandedId) && (
             <div style={{ margin: '0.5rem 0 1rem', padding: '1rem', backgroundColor: '#f9f9f9', borderRadius: 8, border: '1px solid #e0e0e0' }}>
@@ -201,6 +204,22 @@ const RateTablesPage: React.FC = () => {
             </div>
           )}
         </>
+      )}
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={[
+            {
+              label: expandedId === ctxMenu.rt.id ? 'Collapse Tiers' : 'View Tiers',
+              onClick: () => { setExpandedId(expandedId === ctxMenu.rt.id ? null : ctxMenu.rt.id); setCtxMenu(null); },
+            },
+            { label: 'Edit Rate Table', onClick: () => { setShowCreate(true); setCtxMenu(null); } },
+          ]}
+        />
       )}
 
       {/* Create Modal */}

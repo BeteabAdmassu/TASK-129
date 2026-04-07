@@ -49,6 +49,19 @@ const MemberDetailPage: React.FC = () => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
+
+  const toggleReveal = (field: string) => {
+    setRevealedFields(prev => {
+      const next = new Set(prev);
+      if (next.has(field)) {
+        next.delete(field);
+      } else {
+        next.add(field);
+      }
+      return next;
+    });
+  };
 
   // Session packages (loaded with member detail)
   const [packages, setPackages] = useState<SessionPackage[]>([]);
@@ -268,6 +281,36 @@ const MemberDetailPage: React.FC = () => {
             <div><span style={{ fontWeight: 500, color: '#666' }}>Tier:</span> {member.tier_id}</div>
             <div><span style={{ fontWeight: 500, color: '#666' }}>Member Since:</span> {new Date(member.created_at).toLocaleDateString()}</div>
             <div><span style={{ fontWeight: 500, color: '#666' }}>Expires:</span> <span style={{ color: isExpired ? '#dc3545' : '#333' }}>{new Date(member.expires_at).toLocaleDateString()}{isExpired ? ' (expired)' : ''}</span></div>
+            {member.verification_status !== undefined && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontWeight: 500, color: '#666' }}>Verification:</span>
+                <span>{revealedFields.has('verification_status') ? member.verification_status || '—' : '••••••'}</span>
+                <button onClick={() => toggleReveal('verification_status')} title={revealedFields.has('verification_status') ? 'Hide' : 'Reveal'}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', padding: '0 0.25rem' }}>
+                  {revealedFields.has('verification_status') ? '🙈' : '👁️'}
+                </button>
+              </div>
+            )}
+            {member.deposits !== undefined && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontWeight: 500, color: '#666' }}>Deposits:</span>
+                <span>{revealedFields.has('deposits') ? member.deposits || '—' : '••••••'}</span>
+                <button onClick={() => toggleReveal('deposits')} title={revealedFields.has('deposits') ? 'Hide' : 'Reveal'}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', padding: '0 0.25rem' }}>
+                  {revealedFields.has('deposits') ? '🙈' : '👁️'}
+                </button>
+              </div>
+            )}
+            {member.violation_notes !== undefined && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', gridColumn: '1 / -1' }}>
+                <span style={{ fontWeight: 500, color: '#666' }}>Violation Notes:</span>
+                <span>{revealedFields.has('violation_notes') ? member.violation_notes || '—' : '••••••'}</span>
+                <button onClick={() => toggleReveal('violation_notes')} title={revealedFields.has('violation_notes') ? 'Hide' : 'Reveal'}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', padding: '0 0.25rem' }}>
+                  {revealedFields.has('violation_notes') ? '🙈' : '👁️'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start' }}>

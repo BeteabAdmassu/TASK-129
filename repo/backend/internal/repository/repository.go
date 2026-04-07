@@ -99,7 +99,7 @@ func (r *Repository) GetUserByID(id string) (*models.User, error) {
 	u := &models.User{}
 	err := r.DB.QueryRow(
 		`SELECT id, username, password_hash, role, failed_attempts, locked_until, is_active, created_at, updated_at
-		 FROM auth_users WHERE id = $1`, id,
+		 FROM auth_users WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
 	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -133,8 +133,8 @@ func (r *Repository) CreateUser(user *models.User) error {
 func (r *Repository) UpdateUser(user *models.User) error {
 	user.UpdatedAt = time.Now()
 	_, err := r.DB.Exec(
-		`UPDATE auth_users SET username=$1, password_hash=$2, role=$3, is_active=$4, updated_at=$5 WHERE id=$6`,
-		user.Username, user.PasswordHash, user.Role, user.IsActive, user.UpdatedAt, user.ID,
+		`UPDATE auth_users SET username=$1, password_hash=$2, role=$3, is_active=$4, updated_at=$5 WHERE id=$6 AND tenant_id=$7`,
+		user.Username, user.PasswordHash, user.Role, user.IsActive, user.UpdatedAt, user.ID, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("update user: %w", err)
@@ -146,7 +146,7 @@ func (r *Repository) UpdateUser(user *models.User) error {
 func (r *Repository) ListUsers() ([]models.User, error) {
 	rows, err := r.DB.Query(
 		`SELECT id, username, password_hash, role, failed_attempts, locked_until, is_active, created_at, updated_at
-		 FROM auth_users ORDER BY created_at DESC`,
+		 FROM auth_users WHERE tenant_id = $1 ORDER BY created_at DESC`, r.tenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
@@ -273,12 +273,12 @@ func (r *Repository) ListSKUs(search string, page, pageSize int) ([]models.SKU, 
 	return skus, total, rows.Err()
 }
 
-// GetSKU retrieves a single SKU by ID.
+// GetSKU retrieves a single SKU by ID, scoped to the current tenant.
 func (r *Repository) GetSKU(id string) (*models.SKU, error) {
 	s := &models.SKU{}
 	err := r.DB.QueryRow(
 		`SELECT id, ndc, upc, name, description, unit_of_measure, low_stock_threshold, storage_location, is_active, created_at
-		 FROM skus WHERE id = $1`, id,
+		 FROM skus WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
 	).Scan(&s.ID, &s.NDC, &s.UPC, &s.Name, &s.Description, &s.UnitOfMeasure, &s.LowStockThreshold, &s.StorageLocation, &s.IsActive, &s.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -371,9 +371,12 @@ func (r *Repository) GetBatchesBySKU(skuID string) ([]models.InventoryBatch, err
 // GetBatch retrieves a single batch by ID.
 func (r *Repository) GetBatch(id string) (*models.InventoryBatch, error) {
 	b := &models.InventoryBatch{}
+	// inventory_batches has no tenant_id column; scope via the parent SKU's tenant_id.
 	err := r.DB.QueryRow(
-		`SELECT id, sku_id, lot_number, expiration_date, quantity_on_hand, created_at
-		 FROM inventory_batches WHERE id = $1`, id,
+		`SELECT b.id, b.sku_id, b.lot_number, b.expiration_date, b.quantity_on_hand, b.created_at
+		 FROM inventory_batches b
+		 JOIN skus s ON s.id = b.sku_id AND s.tenant_id = $2
+		 WHERE b.id = $1`, id, r.tenantID,
 	).Scan(&b.ID, &b.SKUID, &b.LotNumber, &b.ExpirationDate, &b.QuantityOnHand, &b.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -434,13 +437,16 @@ func (r *Repository) CreateStockTransaction(tx *models.StockTransaction) error {
 // ListStockTransactions returns paginated stock transactions for a SKU.
 func (r *Repository) ListStockTransactions(skuID string, page, pageSize int) ([]models.StockTransaction, int, error) {
 	offset := (page - 1) * pageSize
+	// stock_transactions has no tenant_id; scope via the parent SKU's tenant_id.
 	rows, err := r.DB.Query(
-		`SELECT id, sku_id, batch_id, type, quantity, reason_code, prescription_id, performed_by, created_at,
+		`SELECT st.id, st.sku_id, st.batch_id, st.type, st.quantity, st.reason_code,
+		        st.prescription_id, st.performed_by, st.created_at,
 		        COUNT(*) OVER() AS total
-		 FROM stock_transactions
-		 WHERE sku_id = $1
-		 ORDER BY created_at DESC
-		 LIMIT $2 OFFSET $3`, skuID, pageSize, offset,
+		 FROM stock_transactions st
+		 JOIN skus s ON s.id = st.sku_id AND s.tenant_id = $4
+		 WHERE st.sku_id = $1
+		 ORDER BY st.created_at DESC
+		 LIMIT $2 OFFSET $3`, skuID, pageSize, offset, r.tenantID,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list stock transactions: %w", err)
@@ -481,9 +487,12 @@ func (r *Repository) CreateStocktake(st *models.Stocktake) error {
 // GetStocktake retrieves a stocktake by ID, including its lines.
 func (r *Repository) GetStocktake(id string) (*models.Stocktake, error) {
 	st := &models.Stocktake{}
+	// stocktakes has no tenant_id column; scope via the creator's tenant_id in auth_users.
 	err := r.DB.QueryRow(
-		`SELECT id, period_start, period_end, status, created_by, created_at
-		 FROM stocktakes WHERE id = $1`, id,
+		`SELECT st.id, st.period_start, st.period_end, st.status, st.created_by, st.created_at
+		 FROM stocktakes st
+		 JOIN auth_users u ON u.id = st.created_by AND u.tenant_id = $2
+		 WHERE st.id = $1`, id, r.tenantID,
 	).Scan(&st.ID, &st.PeriodStart, &st.PeriodEnd, &st.Status, &st.CreatedBy, &st.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -698,8 +707,8 @@ func (r *Repository) CreateKnowledgePoint(kp *models.KnowledgePoint) error {
 func (r *Repository) UpdateKnowledgePoint(kp *models.KnowledgePoint) error {
 	kp.UpdatedAt = time.Now()
 	_, err := r.DB.Exec(
-		`UPDATE knowledge_points SET title=$1, content=$2, tags=$3, classifications=$4, updated_at=$5 WHERE id=$6`,
-		kp.Title, kp.Content, pq.Array(kp.Tags), kp.Classifications, kp.UpdatedAt, kp.ID,
+		`UPDATE knowledge_points SET title=$1, content=$2, tags=$3, classifications=$4, updated_at=$5 WHERE id=$6 AND tenant_id=$7`,
+		kp.Title, kp.Content, pq.Array(kp.Tags), kp.Classifications, kp.UpdatedAt, kp.ID, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("update knowledge point: %w", err)
@@ -707,12 +716,12 @@ func (r *Repository) UpdateKnowledgePoint(kp *models.KnowledgePoint) error {
 	return nil
 }
 
-// GetKnowledgePoint retrieves a single knowledge point by ID.
+// GetKnowledgePoint retrieves a single knowledge point by ID, scoped to the current tenant.
 func (r *Repository) GetKnowledgePoint(id string) (*models.KnowledgePoint, error) {
 	kp := &models.KnowledgePoint{}
 	err := r.DB.QueryRow(
 		`SELECT id, chapter_id, title, content, tags, classifications, created_at, updated_at
-		 FROM knowledge_points WHERE id = $1`, id,
+		 FROM knowledge_points WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
 	).Scan(&kp.ID, &kp.ChapterID, &kp.Title, &kp.Content, pq.Array(&kp.Tags), &kp.Classifications, &kp.CreatedAt, &kp.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -964,6 +973,7 @@ func (r *Repository) ListMembers(search string, page, pageSize int) ([]models.Me
 		pattern := "%" + search + "%"
 		rows, err = r.DB.Query(
 			`SELECT id, name, id_number_encrypted, phone, tier_id, points_balance, stored_value, stored_value_encrypted, status, frozen_at, expires_at, created_at,
+			        verification_status_encrypted, deposits_encrypted, violation_notes_encrypted,
 			        COUNT(*) OVER() AS total
 			 FROM members
 			 WHERE (name ILIKE $1 OR phone ILIKE $1) AND tenant_id = $2
@@ -973,6 +983,7 @@ func (r *Repository) ListMembers(search string, page, pageSize int) ([]models.Me
 	} else {
 		rows, err = r.DB.Query(
 			`SELECT id, name, id_number_encrypted, phone, tier_id, points_balance, stored_value, stored_value_encrypted, status, frozen_at, expires_at, created_at,
+			        verification_status_encrypted, deposits_encrypted, violation_notes_encrypted,
 			        COUNT(*) OVER() AS total
 			 FROM members
 			 WHERE tenant_id = $1
@@ -991,7 +1002,8 @@ func (r *Repository) ListMembers(search string, page, pageSize int) ([]models.Me
 		var m models.Member
 		var plainSV float64
 		var encSV []byte
-		if err := rows.Scan(&m.ID, &m.Name, &m.IDNumberEncrypted, &m.Phone, &m.TierID, &m.PointsBalance, &plainSV, &encSV, &m.Status, &m.FrozenAt, &m.ExpiresAt, &m.CreatedAt, &total); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.IDNumberEncrypted, &m.Phone, &m.TierID, &m.PointsBalance, &plainSV, &encSV, &m.Status, &m.FrozenAt, &m.ExpiresAt, &m.CreatedAt,
+			&m.VerificationStatusEncrypted, &m.DepositsEncrypted, &m.ViolationNotesEncrypted, &total); err != nil {
 			return nil, 0, fmt.Errorf("list members scan: %w", err)
 		}
 		m.StoredValue = r.scanMemberStoredValue(encSV, plainSV)
@@ -1006,9 +1018,11 @@ func (r *Repository) GetMember(id string) (*models.Member, error) {
 	var plainSV float64
 	var encSV []byte
 	err := r.DB.QueryRow(
-		`SELECT id, name, id_number_encrypted, phone, tier_id, points_balance, stored_value, stored_value_encrypted, status, frozen_at, expires_at, created_at
+		`SELECT id, name, id_number_encrypted, phone, tier_id, points_balance, stored_value, stored_value_encrypted, status, frozen_at, expires_at, created_at,
+		        verification_status_encrypted, deposits_encrypted, violation_notes_encrypted
 		 FROM members WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
-	).Scan(&m.ID, &m.Name, &m.IDNumberEncrypted, &m.Phone, &m.TierID, &m.PointsBalance, &plainSV, &encSV, &m.Status, &m.FrozenAt, &m.ExpiresAt, &m.CreatedAt)
+	).Scan(&m.ID, &m.Name, &m.IDNumberEncrypted, &m.Phone, &m.TierID, &m.PointsBalance, &plainSV, &encSV, &m.Status, &m.FrozenAt, &m.ExpiresAt, &m.CreatedAt,
+		&m.VerificationStatusEncrypted, &m.DepositsEncrypted, &m.ViolationNotesEncrypted)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1030,9 +1044,10 @@ func (r *Repository) CreateMember(m *models.Member) error {
 		return fmt.Errorf("create member: encrypt stored_value: %w", err)
 	}
 	_, err = r.DB.Exec(
-		`INSERT INTO members (id, name, id_number_encrypted, phone, tier_id, points_balance, stored_value, stored_value_encrypted, status, frozen_at, expires_at, created_at, tenant_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, $9, $10, $11, $12)`,
+		`INSERT INTO members (id, name, id_number_encrypted, phone, tier_id, points_balance, stored_value, stored_value_encrypted, status, frozen_at, expires_at, created_at, tenant_id, verification_status_encrypted, deposits_encrypted, violation_notes_encrypted)
+		 VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		m.ID, m.Name, m.IDNumberEncrypted, m.Phone, m.TierID, m.PointsBalance, encSV, m.Status, m.FrozenAt, m.ExpiresAt, m.CreatedAt, r.tenantID,
+		m.VerificationStatusEncrypted, m.DepositsEncrypted, m.ViolationNotesEncrypted,
 	)
 	if err != nil {
 		return fmt.Errorf("create member: %w", err)
@@ -1215,8 +1230,8 @@ func (r *Repository) CreateRateTable(rt *models.RateTable) error {
 // UpdateRateTable updates an existing rate table.
 func (r *Repository) UpdateRateTable(rt *models.RateTable) error {
 	_, err := r.DB.Exec(
-		`UPDATE rate_tables SET name=$1, type=$2, tiers=$3, fuel_surcharge_pct=$4, taxable=$5, effective_date=$6 WHERE id=$7`,
-		rt.Name, rt.Type, rt.Tiers, rt.FuelSurchargePct, rt.Taxable, rt.EffectiveDate, rt.ID,
+		`UPDATE rate_tables SET name=$1, type=$2, tiers=$3, fuel_surcharge_pct=$4, taxable=$5, effective_date=$6 WHERE id=$7 AND tenant_id=$8`,
+		rt.Name, rt.Type, rt.Tiers, rt.FuelSurchargePct, rt.Taxable, rt.EffectiveDate, rt.ID, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("update rate table: %w", err)
@@ -1229,7 +1244,7 @@ func (r *Repository) ListStatements(page, pageSize int) ([]models.ChargeStatemen
 	offset := (page - 1) * pageSize
 	rows, err := r.DB.Query(
 		`SELECT id, period_start, period_end, total_amount, expected_total, status,
-		        approved_by, variance_notes, paid_at, created_at,
+		        approved_by_1, approved_by_2, reconciled_at, variance_notes, paid_at, created_at,
 		        COUNT(*) OVER() AS total
 		 FROM charge_statements
 		 ORDER BY created_at DESC
@@ -1245,7 +1260,7 @@ func (r *Repository) ListStatements(page, pageSize int) ([]models.ChargeStatemen
 	for rows.Next() {
 		var s models.ChargeStatement
 		if err := rows.Scan(&s.ID, &s.PeriodStart, &s.PeriodEnd, &s.TotalAmount, &s.ExpectedTotal,
-			&s.Status, &s.ApprovedBy, &s.VarianceNotes, &s.PaidAt, &s.CreatedAt, &total); err != nil {
+			&s.Status, &s.ApprovedBy1, &s.ApprovedBy2, &s.ReconciledAt, &s.VarianceNotes, &s.PaidAt, &s.CreatedAt, &total); err != nil {
 			return nil, 0, fmt.Errorf("list statements scan: %w", err)
 		}
 		stmts = append(stmts, s)
@@ -1253,15 +1268,15 @@ func (r *Repository) ListStatements(page, pageSize int) ([]models.ChargeStatemen
 	return stmts, total, rows.Err()
 }
 
-// GetStatement retrieves a single charge statement by ID.
+// GetStatement retrieves a single charge statement by ID, scoped to the current tenant.
 func (r *Repository) GetStatement(id string) (*models.ChargeStatement, error) {
 	s := &models.ChargeStatement{}
 	err := r.DB.QueryRow(
 		`SELECT id, period_start, period_end, total_amount, expected_total, status,
-		        approved_by, variance_notes, paid_at, created_at
-		 FROM charge_statements WHERE id = $1`, id,
+		        approved_by_1, approved_by_2, reconciled_at, variance_notes, paid_at, created_at
+		 FROM charge_statements WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
 	).Scan(&s.ID, &s.PeriodStart, &s.PeriodEnd, &s.TotalAmount, &s.ExpectedTotal, &s.Status,
-		&s.ApprovedBy, &s.VarianceNotes, &s.PaidAt, &s.CreatedAt)
+		&s.ApprovedBy1, &s.ApprovedBy2, &s.ReconciledAt, &s.VarianceNotes, &s.PaidAt, &s.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1279,10 +1294,10 @@ func (r *Repository) CreateStatement(stmt *models.ChargeStatement) error {
 	stmt.CreatedAt = time.Now()
 	_, err := r.DB.Exec(
 		`INSERT INTO charge_statements (id, period_start, period_end, total_amount, expected_total, status,
-		        approved_by, variance_notes, paid_at, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		        approved_by_1, approved_by_2, reconciled_at, variance_notes, paid_at, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		stmt.ID, stmt.PeriodStart, stmt.PeriodEnd, stmt.TotalAmount, stmt.ExpectedTotal, stmt.Status,
-		stmt.ApprovedBy, stmt.VarianceNotes, stmt.PaidAt, stmt.CreatedAt,
+		stmt.ApprovedBy1, stmt.ApprovedBy2, stmt.ReconciledAt, stmt.VarianceNotes, stmt.PaidAt, stmt.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create statement: %w", err)
@@ -1295,10 +1310,12 @@ func (r *Repository) UpdateStatement(stmt *models.ChargeStatement) error {
 	_, err := r.DB.Exec(
 		`UPDATE charge_statements
 		 SET period_start=$1, period_end=$2, total_amount=$3, expected_total=$4,
-		     status=$5, approved_by=$6, variance_notes=$7, paid_at=$8
-		 WHERE id=$9`,
+		     status=$5, approved_by_1=$6, approved_by_2=$7, reconciled_at=$8,
+		     variance_notes=$9, paid_at=$10
+		 WHERE id=$11 AND tenant_id=$12`,
 		stmt.PeriodStart, stmt.PeriodEnd, stmt.TotalAmount, stmt.ExpectedTotal,
-		stmt.Status, stmt.ApprovedBy, stmt.VarianceNotes, stmt.PaidAt, stmt.ID,
+		stmt.Status, stmt.ApprovedBy1, stmt.ApprovedBy2, stmt.ReconciledAt,
+		stmt.VarianceNotes, stmt.PaidAt, stmt.ID, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("update statement: %w", err)
@@ -1540,9 +1557,12 @@ func (r *Repository) GetMemberByID(id string) (*models.Member, error) {
 // GetSessionPackage retrieves a single session package by its ID.
 func (r *Repository) GetSessionPackage(id string) (*models.SessionPackage, error) {
 	p := &models.SessionPackage{}
+	// session_packages has no tenant_id column; scope via the parent member's tenant_id.
 	err := r.DB.QueryRow(
-		`SELECT id, member_id, package_name, total_sessions, remaining_sessions, expires_at
-		 FROM session_packages WHERE id = $1`, id,
+		`SELECT sp.id, sp.member_id, sp.package_name, sp.total_sessions, sp.remaining_sessions, sp.expires_at
+		 FROM session_packages sp
+		 JOIN members m ON m.id = sp.member_id AND m.tenant_id = $2
+		 WHERE sp.id = $1`, id, r.tenantID,
 	).Scan(&p.ID, &p.MemberID, &p.PackageName, &p.TotalSessions, &p.RemainingSessions, &p.ExpiresAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -1580,7 +1600,7 @@ func (r *Repository) ListTiers() ([]models.MembershipTier, error) {
 func (r *Repository) GetRateTableByID(id string) (*models.RateTable, error) {
 	rt := &models.RateTable{}
 	err := r.DB.QueryRow(
-		`SELECT id, name, type, tiers, fuel_surcharge_pct, taxable, effective_date FROM rate_tables WHERE id = $1`, id,
+		`SELECT id, name, type, tiers, fuel_surcharge_pct, taxable, effective_date FROM rate_tables WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
 	).Scan(&rt.ID, &rt.Name, &rt.Type, &rt.Tiers, &rt.FuelSurchargePct, &rt.Taxable, &rt.EffectiveDate)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -1658,8 +1678,9 @@ func (r *Repository) GetWorkOrderPhotos(workOrderID string) ([]models.ManagedFil
 		        f.uploaded_by, f.retention_until, f.created_at
 		 FROM managed_files f
 		 JOIN work_order_photos wop ON wop.file_id = f.id
-		 WHERE wop.work_order_id = $1
-		 ORDER BY wop.created_at`, workOrderID,
+		 JOIN work_orders wo ON wo.id = wop.work_order_id AND wo.tenant_id = $2
+		 WHERE wop.work_order_id = $1 AND f.tenant_id = $2
+		 ORDER BY wop.created_at`, workOrderID, r.tenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get work order photos: %w", err)
@@ -1703,7 +1724,7 @@ func (r *Repository) ListExpiredFiles() ([]models.ManagedFile, error) {
 
 // DeleteFileRecord removes a managed file record from the database.
 func (r *Repository) DeleteFileRecord(id string) error {
-	_, err := r.DB.Exec(`DELETE FROM managed_files WHERE id = $1`, id)
+	_, err := r.DB.Exec(`DELETE FROM managed_files WHERE id = $1 AND tenant_id = $2`, id, r.tenantID)
 	if err != nil {
 		return fmt.Errorf("delete file record %s: %w", id, err)
 	}

@@ -134,6 +134,9 @@ export interface Member {
   frozen_at?: string;
   expires_at: string;
   created_at: string;
+  verification_status?: string;  // masked by default
+  deposits?: string;             // masked by default
+  violation_notes?: string;      // masked by default
 }
 
 export interface MembershipTier {
@@ -172,8 +175,8 @@ export interface RateTable {
   effective_date: string;
 }
 
-/** Canonical statement lifecycle: pending → approved → paid */
-export type StatementStatus = 'pending' | 'approved' | 'paid';
+/** Canonical statement lifecycle: pending → reconciled → approved → paid */
+export type StatementStatus = 'pending' | 'reconciled' | 'approved' | 'paid';
 
 export interface ChargeStatement {
   id: string;
@@ -182,7 +185,9 @@ export interface ChargeStatement {
   total_amount: number;
   expected_total: number;
   status: StatementStatus;
-  approved_by?: string;
+  approved_by_1?: string;
+  approved_by_2?: string;
+  reconciled_at?: string;
   variance_notes?: string;
   paid_at?: string;
   created_at: string;

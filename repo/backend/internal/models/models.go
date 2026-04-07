@@ -134,6 +134,13 @@ type Member struct {
 	FrozenAt           *time.Time `json:"frozen_at,omitempty"`
 	ExpiresAt          time.Time  `json:"expires_at"`
 	CreatedAt          time.Time  `json:"created_at"`
+	VerificationStatusEncrypted []byte `json:"-"`
+	DepositsEncrypted           []byte `json:"-"`
+	ViolationNotesEncrypted     []byte `json:"-"`
+	// Decrypted/masked views (populated by handler, never stored)
+	VerificationStatus string `json:"verification_status,omitempty"`
+	Deposits           string `json:"deposits,omitempty"`
+	ViolationNotes     string `json:"violation_notes,omitempty"`
 }
 
 type MembershipTier struct {
@@ -172,15 +179,17 @@ type RateTable struct {
 	EffectiveDate     string          `json:"effective_date"`
 }
 
-// ChargeStatement lifecycle: pending → approved → paid (no direct pending→paid).
+// ChargeStatement lifecycle: pending → reconciled → approved → paid (no direct pending→paid).
 type ChargeStatement struct {
 	ID            string     `json:"id"`
 	PeriodStart   string     `json:"period_start"`
 	PeriodEnd     string     `json:"period_end"`
 	TotalAmount   float64    `json:"total_amount"`
 	ExpectedTotal float64    `json:"expected_total"`
-	Status        string     `json:"status"` // pending | approved | paid
-	ApprovedBy    *string    `json:"approved_by,omitempty"`
+	Status        string     `json:"status"` // pending | reconciled | approved | paid
+	ApprovedBy1   *string    `json:"approved_by_1,omitempty"`
+	ApprovedBy2   *string    `json:"approved_by_2,omitempty"`
+	ReconciledAt  *time.Time `json:"reconciled_at,omitempty"`
 	VarianceNotes *string    `json:"variance_notes,omitempty"`
 	PaidAt        *time.Time `json:"paid_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -316,10 +325,13 @@ type RateWorkOrderRequest struct {
 }
 
 type CreateMemberRequest struct {
-	Name     string  `json:"name"`
-	IDNumber string  `json:"id_number"`
-	Phone    string  `json:"phone"`
-	TierID   string  `json:"tier_id"`
+	Name               string `json:"name"`
+	IDNumber           string `json:"id_number"`
+	Phone              string `json:"phone"`
+	TierID             string `json:"tier_id"`
+	VerificationStatus string `json:"verification_status,omitempty"`
+	Deposits           string `json:"deposits,omitempty"`
+	ViolationNotes     string `json:"violation_notes,omitempty"`
 }
 
 type RedeemRequest struct {

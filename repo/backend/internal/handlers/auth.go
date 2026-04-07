@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -71,9 +70,9 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	// Check lockout
 	if user.LockedUntil != nil && user.LockedUntil.After(time.Now()) {
 		logrus.WithField("username", req.Username).Warn("Login attempt for locked user")
-		return c.JSON(http.StatusForbidden, models.ErrorResponse{
+		return c.JSON(http.StatusLocked, models.ErrorResponse{
 			Error:   "Account locked",
-			Code:    http.StatusForbidden,
+			Code:    http.StatusLocked,
 			Details: "Too many failed attempts. Please try again later.",
 		})
 	}
@@ -143,9 +142,7 @@ func (h *AuthHandler) Logout(c echo.Context) error {
 
 	logrus.WithField("user_id", userID).Info("User logged out")
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Logged out successfully",
-	})
+	return c.NoContent(http.StatusNoContent)
 }
 
 // GetMe returns the currently authenticated user's profile.
@@ -244,11 +241,5 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 	})
 
 	logrus.WithField("user_id", userID).Info("User changed password")
-
-	details, _ := json.Marshal(map[string]string{"action": "password_changed"})
-	_ = details
-
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Password updated successfully",
-	})
+	return c.NoContent(http.StatusNoContent)
 }

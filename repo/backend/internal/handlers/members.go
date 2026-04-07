@@ -54,6 +54,34 @@ func (h *MemberHandler) encryptField(plaintext string) ([]byte, error) {
 	return []byte(hex.EncodeToString(ciphertext)), nil
 }
 
+// decryptField decrypts a hex-encoded AES-256-GCM ciphertext back to plaintext.
+func (h *MemberHandler) decryptField(data []byte) (string, error) {
+	if len(data) == 0 {
+		return "", nil
+	}
+	ciphertext, err := hex.DecodeString(string(data))
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(h.encryptKey)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+	plaintext, err := gcm.Open(nil, ciphertext[:nonceSize], ciphertext[nonceSize:], nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
+}
+
 // ListMembers returns a paginated list of members with optional search.
 func (h *MemberHandler) ListMembers(c echo.Context) error {
 	search := c.QueryParam("search")
@@ -73,6 +101,19 @@ func (h *MemberHandler) ListMembers(c echo.Context) error {
 			Error: "Failed to retrieve members",
 			Code:  http.StatusInternalServerError,
 		})
+	}
+
+	// Decrypt sensitive fields for each member
+	for i := range members {
+		if vs, err := h.decryptField(members[i].VerificationStatusEncrypted); err == nil {
+			members[i].VerificationStatus = vs
+		}
+		if dep, err := h.decryptField(members[i].DepositsEncrypted); err == nil {
+			members[i].Deposits = dep
+		}
+		if vn, err := h.decryptField(members[i].ViolationNotesEncrypted); err == nil {
+			members[i].ViolationNotes = vn
+		}
 	}
 
 	return c.JSON(http.StatusOK, models.PaginatedResponse{
@@ -122,18 +163,57 @@ func (h *MemberHandler) CreateMember(c echo.Context) error {
 		encryptedID = enc
 	}
 
+	// Encrypt sensitive fields
+	var encVerificationStatus, encDeposits, encViolationNotes []byte
+	if req.VerificationStatus != "" {
+		enc, err := h.encryptField(req.VerificationStatus)
+		if err != nil {
+			logrus.WithError(err).Error("Failed to encrypt verification_status")
+			return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error: "Failed to process member data",
+				Code:  http.StatusInternalServerError,
+			})
+		}
+		encVerificationStatus = enc
+	}
+	if req.Deposits != "" {
+		enc, err := h.encryptField(req.Deposits)
+		if err != nil {
+			logrus.WithError(err).Error("Failed to encrypt deposits")
+			return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error: "Failed to process member data",
+				Code:  http.StatusInternalServerError,
+			})
+		}
+		encDeposits = enc
+	}
+	if req.ViolationNotes != "" {
+		enc, err := h.encryptField(req.ViolationNotes)
+		if err != nil {
+			logrus.WithError(err).Error("Failed to encrypt violation_notes")
+			return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error: "Failed to process member data",
+				Code:  http.StatusInternalServerError,
+			})
+		}
+		encViolationNotes = enc
+	}
+
 	now := time.Now()
 	member := &models.Member{
-		ID:                uuid.New().String(),
-		Name:              req.Name,
-		IDNumberEncrypted: encryptedID,
-		Phone:             req.Phone,
-		TierID:            req.TierID,
-		PointsBalance:     0,
-		StoredValue:       0,
-		Status:            "active",
-		ExpiresAt:         now.AddDate(1, 0, 0), // 1 year from now
-		CreatedAt:         now,
+		ID:                          uuid.New().String(),
+		Name:                        req.Name,
+		IDNumberEncrypted:           encryptedID,
+		Phone:                       req.Phone,
+		TierID:                      req.TierID,
+		PointsBalance:               0,
+		StoredValue:                 0,
+		Status:                      "active",
+		ExpiresAt:                   now.AddDate(1, 0, 0), // 1 year from now
+		CreatedAt:                   now,
+		VerificationStatusEncrypted: encVerificationStatus,
+		DepositsEncrypted:           encDeposits,
+		ViolationNotesEncrypted:     encViolationNotes,
 	}
 
 	if err := h.repo.CreateMember(member); err != nil {
@@ -189,6 +269,17 @@ func (h *MemberHandler) GetMember(c echo.Context) error {
 			Code:    http.StatusNotFound,
 			Details: "No member found with the given ID",
 		})
+	}
+
+	// Decrypt sensitive fields
+	if vs, err := h.decryptField(member.VerificationStatusEncrypted); err == nil {
+		member.VerificationStatus = vs
+	}
+	if dep, err := h.decryptField(member.DepositsEncrypted); err == nil {
+		member.Deposits = dep
+	}
+	if vn, err := h.decryptField(member.ViolationNotesEncrypted); err == nil {
+		member.ViolationNotes = vn
 	}
 
 	return c.JSON(http.StatusOK, member)

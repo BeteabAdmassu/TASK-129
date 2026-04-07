@@ -23,10 +23,12 @@ const config = {
     'package.json',
   ],
 
-  // Extra resources bundled alongside the app (not in asar)
+  // Extra resources bundled alongside the app (not in asar).
+  // backend-dist/ lives inside frontend/ — output of scripts/build-backend-win.sh.
+  // The path is relative to the electron-builder working directory (frontend/).
   extraResources: [
     {
-      from: '../backend-dist/',   // pre-built Go binaries (see scripts/build-backend.sh)
+      from: 'backend-dist/',   // pre-built Go binaries (see scripts/build-backend-win.sh)
       to: 'backend',
       filter: ['**/*'],
     },

@@ -107,6 +107,39 @@ fi
 
 AUTH_HEADER="Authorization: Bearer $TOKEN"
 
+# Logout returns 204 No Content
+LOGOUT_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_URL}/auth/logout" \
+    -H "$AUTH_HEADER")
+if [ "$LOGOUT_CODE" -eq 204 ]; then
+    pass "Logout returns 204 No Content"
+else
+    fail "Logout status code" "Expected 204, got $LOGOUT_CODE"
+fi
+
+# Re-login after logout test
+LOGIN_RES2=$(curl -sf -X POST "${API_URL}/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"Admin123!"}')
+TOKEN=$(echo "$LOGIN_RES2" | jq -r '.token')
+AUTH_HEADER="Authorization: Bearer $TOKEN"
+
+# Password change returns 204 No Content
+PWCHANGE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "${API_URL}/auth/password" \
+    -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+    -d '{"current_password":"Admin123!","new_password":"Admin123!New"}')
+if [ "$PWCHANGE_CODE" -eq 204 ]; then
+    pass "Password change returns 204 No Content"
+else
+    fail "Password change status code" "Expected 204, got $PWCHANGE_CODE"
+fi
+
+# Re-login with new password
+LOGIN_RES3=$(curl -sf -X POST "${API_URL}/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"Admin123!New"}')
+TOKEN=$(echo "$LOGIN_RES3" | jq -r '.token')
+AUTH_HEADER="Authorization: Bearer $TOKEN"
+
 # ---- User Management ----
 echo ""
 echo "--- User Management ---"

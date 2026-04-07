@@ -515,8 +515,8 @@ func (h *ChargeHandler) GenerateStatement(c echo.Context) error {
 // statementIsReconcilable returns true only when the statement is in pending status.
 func statementIsReconcilable(status string) bool { return status == "pending" }
 
-// statementIsApprovable returns true only when the statement is in pending status.
-func statementIsApprovable(status string) bool { return status == "pending" }
+// statementIsApprovable returns true only when the statement is in reconciled status.
+func statementIsApprovable(status string) bool { return status == "reconciled" }
 
 // statementVarianceExceedsThreshold returns true when ABS(total - expected) > 25.
 // This is the correct reconciliation escalation check per the business rule.
@@ -594,8 +594,12 @@ func (h *ChargeHandler) ReconcileStatement(c echo.Context) error {
 	if req.VarianceNotes != "" {
 		statement.VarianceNotes = &req.VarianceNotes
 	}
-	// Reconcile transitions pending → approved.
-	statement.Status = "approved"
+	// Reconcile transitions pending → reconciled.
+	userID := middleware.GetUserID(c)
+	now := time.Now()
+	statement.ApprovedBy1 = &userID
+	statement.Status = "reconciled"
+	statement.ReconciledAt = &now
 
 	if err := h.repo.UpdateStatement(statement); err != nil {
 		logrus.WithError(err).Error("Failed to reconcile statement")
@@ -605,7 +609,6 @@ func (h *ChargeHandler) ReconcileStatement(c echo.Context) error {
 		})
 	}
 
-	userID := middleware.GetUserID(c)
 	details, _ := json.Marshal(map[string]interface{}{
 		"statement_id":   id,
 		"variance_notes": req.VarianceNotes,
@@ -658,12 +661,20 @@ func (h *ChargeHandler) ApproveStatement(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid statement state",
 			Code:    http.StatusBadRequest,
-			Details: "Only pending statements can be approved",
+			Details: "Only reconciled statements can be approved",
 		})
 	}
 
-	// Single-step approval: pending → approved.
-	statement.ApprovedBy = &userID
+	// Two-step approval: reconciled → approved; approver must differ from reconciler.
+	if statement.ApprovedBy1 != nil && *statement.ApprovedBy1 == userID {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error:   "Approver cannot be the same as reconciler",
+			Code:    http.StatusForbidden,
+			Details: "A different user must perform the second-step approval",
+		})
+	}
+
+	statement.ApprovedBy2 = &userID
 	statement.Status = "approved"
 
 	if err := h.repo.UpdateStatement(statement); err != nil {

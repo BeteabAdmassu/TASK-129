@@ -134,7 +134,7 @@ const WorkOrderDetailPage: React.FC = () => {
   const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
   const remainingMins = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
   const currentStepIndex = statusSteps.indexOf(order.status);
-  const isMaintenance = user?.role === 'maintenance' || user?.role === 'admin';
+  const isMaintenance = user?.role === 'maintenance_tech' || user?.role === 'system_admin';
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: 900, margin: '0 auto' }}>

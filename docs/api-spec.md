@@ -153,8 +153,8 @@ Response includes:
 | GET | /statements | Admin | List | query: `?status=&from=&to=` | `{data[], pagination}` | — |
 | POST | /statements/generate | Admin | Generate | `{period_start, period_end}` | `{statement}` | 400 |
 | GET | /statements/:id | Admin | Detail + lines | — | `{statement, line_items[]}` | 404 |
-| POST | /statements/:id/reconcile | Admin | Reconcile & approve (`pending`→`approved`) | `{expected_total, variance_notes?}` — `variance_notes` required if ABS(total-expected)>$25 | `{statement}` | 400 |
-| POST | /statements/:id/approve | Admin | Approve (alias, same state transition as reconcile) | — | `{statement}` | 400 |
+| POST | /statements/:id/reconcile | Admin | Reconcile (`pending`→`reconciled`); sets `approved_by_1` and `reconciled_at` | `{expected_total, variance_notes?}` — `variance_notes` required if ABS(total-expected)>$25 | `{statement}` | 400 |
+| POST | /statements/:id/approve | Admin | Approve (`reconciled`→`approved`); sets `approved_by_2`; returns 403 if approver == reconciler | — | `{statement}` | 400, 403 |
 | POST | /statements/:id/export | Admin | Export & mark paid (`approved`→`paid`) | query: `?format=csv\|json` | file download | 400 (if not `approved`) |
 
 ### Files
