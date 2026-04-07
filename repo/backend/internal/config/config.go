@@ -10,6 +10,7 @@ type Config struct {
 	DatabaseURL string
 	JWTSecret   string
 	EncryptKey  string
+	HMACKey     string
 	LogLevel    string
 	DataDir     string
 }
@@ -20,6 +21,7 @@ func Load() *Config {
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://medops:medops@localhost:5432/medops?sslmode=disable"),
 		JWTSecret:   getEnv("JWT_SECRET", "medops-local-secret-change-in-production"),
 		EncryptKey:  getEnv("ENCRYPT_KEY", "0123456789abcdef0123456789abcdef"),
+		HMACKey:     getEnv("HMAC_SIGNING_KEY", "medops-export-signing-key-change-in-production"),
 		LogLevel:    getEnv("LOG_LEVEL", "info"),
 		DataDir:     getEnv("DATA_DIR", "/data/medops"),
 	}

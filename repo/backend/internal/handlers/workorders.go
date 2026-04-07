@@ -151,7 +151,7 @@ func (h *WorkOrderHandler) CreateWorkOrder(c echo.Context) error {
 		Trade:       req.Trade,
 		Priority:    req.Priority,
 		SLADeadline: computeSLADeadline(req.Priority, now),
-		Status:      "open",
+		Status:      "submitted",
 		Description: req.Description,
 		Location:    req.Location,
 		CreatedAt:   now,
@@ -161,7 +161,7 @@ func (h *WorkOrderHandler) CreateWorkOrder(c echo.Context) error {
 	techID, err := h.repo.GetTechWithLeastOrders(req.Trade)
 	if err == nil && techID != "" {
 		wo.AssignedTo = &techID
-		wo.Status = "assigned"
+		wo.Status = "dispatched"
 	}
 
 	if err := h.repo.CreateWorkOrder(wo); err != nil {
@@ -250,8 +250,8 @@ func (h *WorkOrderHandler) UpdateWorkOrder(c echo.Context) error {
 
 	if body.Status != nil {
 		validStatuses := map[string]bool{
-			"open": true, "assigned": true, "in_progress": true,
-			"on_hold": true, "completed": true, "cancelled": true,
+			"submitted": true, "dispatched": true, "in_progress": true,
+			"completed": true, "closed": true,
 		}
 		if !validStatuses[*body.Status] {
 			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -317,7 +317,7 @@ func (h *WorkOrderHandler) CloseWorkOrder(c echo.Context) error {
 		})
 	}
 
-	if wo.Status == "completed" || wo.Status == "cancelled" {
+	if wo.Status == "completed" || wo.Status == "closed" {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Work order already closed",
 			Code:    http.StatusBadRequest,

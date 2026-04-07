@@ -45,6 +45,13 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	user, err := h.repo.GetUserByUsername(req.Username)
 	if err != nil {
+		logrus.WithField("username", req.Username).Error("Database error during login")
+		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+			Error: "Invalid credentials",
+			Code:  http.StatusUnauthorized,
+		})
+	}
+	if user == nil {
 		logrus.WithField("username", req.Username).Warn("Login attempt for unknown user")
 		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error: "Invalid credentials",

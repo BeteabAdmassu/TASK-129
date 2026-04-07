@@ -204,7 +204,7 @@ func (h *SystemHandler) ListDrafts(c echo.Context) error {
 
 // GetDraft returns a single draft by ID.
 func (h *SystemHandler) GetDraft(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param("formId")
 	if id == "" {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error: "Draft ID is required",
@@ -239,7 +239,7 @@ func (h *SystemHandler) GetDraft(c echo.Context) error {
 
 // DeleteDraft deletes a draft by ID.
 func (h *SystemHandler) DeleteDraft(c echo.Context) error {
-	id := c.Param("id")
+	id := c.Param("formId")
 	if id == "" {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error: "Draft ID is required",

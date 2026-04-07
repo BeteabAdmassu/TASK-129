@@ -25,6 +25,7 @@ services:
       DATABASE_URL: "postgres://medops:medops@db:5432/medops?sslmode=disable"
       JWT_SECRET: "medops-local-secret-change-in-production"
       ENCRYPT_KEY: "0123456789abcdef0123456789abcdef"
+      HMAC_SIGNING_KEY: "medops-export-signing-key-change-in-production"
       LOG_LEVEL: "info"
       DATA_DIR: "/data/medops"
     ports:

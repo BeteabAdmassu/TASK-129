@@ -103,8 +103,8 @@ func main() {
 	inventoryHandler := handlers.NewInventoryHandler(repo)
 	learningHandler := handlers.NewLearningHandler(repo)
 	workOrderHandler := handlers.NewWorkOrderHandler(repo)
-	memberHandler := handlers.NewMemberHandler(repo)
-	chargeHandler := handlers.NewChargeHandler(repo)
+	memberHandler := handlers.NewMemberHandler(repo, cfg.EncryptKey)
+	chargeHandler := handlers.NewChargeHandler(repo, cfg.HMACKey)
 	fileHandler := handlers.NewFileHandler(repo, cfg.DataDir)
 	systemHandler := handlers.NewSystemHandler(repo)
 

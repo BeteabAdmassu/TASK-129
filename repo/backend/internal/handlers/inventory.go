@@ -739,7 +739,7 @@ func (h *InventoryHandler) CreateStocktake(c echo.Context) error {
 		ID:          uuid.New().String(),
 		PeriodStart: req.PeriodStart,
 		PeriodEnd:   req.PeriodEnd,
-		Status:      "open",
+		Status:      "draft",
 		CreatedBy:   userID,
 		CreatedAt:   time.Now(),
 	}
@@ -814,7 +814,7 @@ func (h *InventoryHandler) UpdateStocktakeLines(c echo.Context) error {
 		})
 	}
 
-	if stocktake.Status != "open" {
+	if stocktake.Status != "draft" {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Stocktake not open",
 			Code:    http.StatusBadRequest,
@@ -901,7 +901,7 @@ func (h *InventoryHandler) CompleteStocktake(c echo.Context) error {
 		})
 	}
 
-	if stocktake.Status != "open" {
+	if stocktake.Status != "draft" {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Stocktake not open",
 			Code:    http.StatusBadRequest,

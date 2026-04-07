@@ -232,7 +232,7 @@ FUTURE_DATE=$(date -d "+365 days" +%Y-%m-%d 2>/dev/null || date -v+365d +%Y-%m-%
 RECEIVE=$(curl -sf -X POST "${API_URL}/inventory/receive" \
     -H "Authorization: Bearer $PHARM_TOKEN" -H "Content-Type: application/json" \
     -d "{\"sku_id\":\"${SKU_ID}\",\"lot_number\":\"LOT-001\",\"expiration_date\":\"${FUTURE_DATE}\",\"quantity\":100,\"storage_location\":\"Shelf A-1\",\"reason_code\":\"purchase_order\"}")
-BATCH_ID=$(echo "$RECEIVE" | jq -r '.batch_id // empty')
+BATCH_ID=$(echo "$RECEIVE" | jq -r '.batch.id // empty')
 if [ -n "$BATCH_ID" ]; then
     pass "Receive stock"
 else
@@ -253,7 +253,7 @@ fi
 DISPENSE=$(curl -sf -X POST "${API_URL}/inventory/dispense" \
     -H "Authorization: Bearer $PHARM_TOKEN" -H "Content-Type: application/json" \
     -d "{\"sku_id\":\"${SKU_ID}\",\"batch_id\":\"${BATCH_ID}\",\"quantity\":10,\"reason_code\":\"prescription\",\"prescription_id\":\"RX-001\"}")
-if echo "$DISPENSE" | jq -e '.id' > /dev/null 2>&1; then
+if echo "$DISPENSE" | jq -e '.transaction.id' > /dev/null 2>&1; then
     pass "Dispense stock"
 else
     fail "Dispense stock" "$DISPENSE"
@@ -403,7 +403,7 @@ echo "--- Membership Management ---"
 
 # List tiers
 TIERS=$(curl -sf "${API_URL}/membership-tiers" -H "Authorization: Bearer $FD_TOKEN")
-TIER_ID=$(echo "$TIERS" | jq -r '.[0].id // empty')
+TIER_ID=$(echo "$TIERS" | jq -r '.data[0].id // empty')
 if [ -n "$TIER_ID" ]; then
     pass "List membership tiers"
 else
@@ -505,7 +505,7 @@ fi
 GEN_STMT=$(curl -sf -X POST "${API_URL}/statements/generate" \
     -H "$AUTH_HEADER" -H "Content-Type: application/json" \
     -d '{"period_start":"2026-01-01","period_end":"2026-01-31"}')
-STMT_ID=$(echo "$GEN_STMT" | jq -r '.id // empty')
+STMT_ID=$(echo "$GEN_STMT" | jq -r '.statement.id // empty')
 if [ -n "$STMT_ID" ]; then
     pass "Generate charge statement"
 else

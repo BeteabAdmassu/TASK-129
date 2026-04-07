@@ -24,12 +24,13 @@ import (
 
 // ChargeHandler handles charge and billing requests.
 type ChargeHandler struct {
-	repo *repository.Repository
+	repo    *repository.Repository
+	hmacKey string
 }
 
 // NewChargeHandler creates a new ChargeHandler.
-func NewChargeHandler(repo *repository.Repository) *ChargeHandler {
-	return &ChargeHandler{repo: repo}
+func NewChargeHandler(repo *repository.Repository, hmacKey string) *ChargeHandler {
+	return &ChargeHandler{repo: repo, hmacKey: hmacKey}
 }
 
 // ListRateTables returns all rate tables.
@@ -305,10 +306,16 @@ func (h *ChargeHandler) ImportRateTableCSV(c echo.Context) error {
 	}
 
 	// Create a new rate table with the parsed tiers
+	// Type defaults to "distance" if not provided via form field
+	rtType := c.FormValue("type")
+	validTypes := map[string]bool{"distance": true, "weight": true, "volume": true}
+	if !validTypes[rtType] {
+		rtType = "distance"
+	}
 	rt := &models.RateTable{
 		ID:    uuid.New().String(),
 		Name:  strings.TrimSuffix(file.Filename, ".csv"),
-		Type:  "imported",
+		Type:  rtType,
 		Tiers: tiersJSON,
 	}
 
@@ -724,8 +731,7 @@ func (h *ChargeHandler) ExportStatement(c echo.Context) error {
 	content := []byte(sb.String())
 
 	// Compute HMAC-SHA256 signature
-	hmacKey := []byte("medops-export-signing-key")
-	mac := hmac.New(sha256.New, hmacKey)
+	mac := hmac.New(sha256.New, []byte(h.hmacKey))
 	mac.Write(content)
 	signature := hex.EncodeToString(mac.Sum(nil))
 

@@ -1,9 +1,13 @@
 package handlers
 
 import (
-	"encoding/base64"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,12 +23,35 @@ import (
 
 // MemberHandler handles membership management requests.
 type MemberHandler struct {
-	repo *repository.Repository
+	repo       *repository.Repository
+	encryptKey []byte
 }
 
 // NewMemberHandler creates a new MemberHandler.
-func NewMemberHandler(repo *repository.Repository) *MemberHandler {
-	return &MemberHandler{repo: repo}
+func NewMemberHandler(repo *repository.Repository, encryptKey string) *MemberHandler {
+	key := []byte(encryptKey)
+	// Pad or truncate to 32 bytes for AES-256
+	k := make([]byte, 32)
+	copy(k, key)
+	return &MemberHandler{repo: repo, encryptKey: k}
+}
+
+// encryptField encrypts plaintext using AES-256-GCM and returns a hex-encoded ciphertext.
+func (h *MemberHandler) encryptField(plaintext string) ([]byte, error) {
+	block, err := aes.NewCipher(h.encryptKey)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return []byte(hex.EncodeToString(ciphertext)), nil
 }
 
 // ListMembers returns a paginated list of members with optional search.
@@ -81,10 +108,18 @@ func (h *MemberHandler) CreateMember(c echo.Context) error {
 		})
 	}
 
-	// Encrypt ID number using base64 (simplified for Docker env)
+	// Encrypt ID number using AES-256-GCM
 	var encryptedID []byte
 	if req.IDNumber != "" {
-		encryptedID = []byte(base64.StdEncoding.EncodeToString([]byte(req.IDNumber)))
+		enc, err := h.encryptField(req.IDNumber)
+		if err != nil {
+			logrus.WithError(err).Error("Failed to encrypt member ID number")
+			return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+				Error: "Failed to process member data",
+				Code:  http.StatusInternalServerError,
+			})
+		}
+		encryptedID = enc
 	}
 
 	now := time.Now()
