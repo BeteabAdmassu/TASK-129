@@ -12,6 +12,7 @@ import {
   nativeImage,
   session,
   Notification,
+  safeStorage,
 } from 'electron';
 import { join } from 'path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -184,34 +185,91 @@ interface AppSecrets {
 }
 
 /**
- * Ensures the three backend secrets (JWT_SECRET, ENCRYPT_KEY, HMAC_SIGNING_KEY)
- * exist. On first run they are generated via crypto.randomBytes and persisted in
- * a mode-0600 JSON file inside the app's userData directory. Subsequent starts
- * load the stored values so secrets survive restarts without re-generation.
+ * ensureSecrets — loads or generates the three backend secrets.
+ *
+ * Storage strategy (in priority order):
+ *  1. Encrypted file via Electron safeStorage (OS DPAPI on Windows).
+ *     File: <userData>/.secrets.enc  (binary, not human-readable)
+ *  2. Plain-text fallback ONLY in dev mode (IS_DEV === true) where
+ *     safeStorage may not be available and security requirements are relaxed.
+ *
+ * On packaged (non-dev) builds safeStorage is always available on Windows 10+.
+ * If it is somehow unavailable the app shows an explicit error and quits — it
+ * must NOT silently fall back to plaintext storage in production.
  */
 function ensureSecrets(userDataDir: string): AppSecrets {
   mkdirSync(userDataDir, { recursive: true });
-  const secretsPath = join(userDataDir, '.secrets.json');
-  if (existsSync(secretsPath)) {
+
+  const encPath = join(userDataDir, '.secrets.enc');
+  const legacyPath = join(userDataDir, '.secrets.json');
+
+  // --- Try loading from encrypted store ---
+  if (safeStorage.isEncryptionAvailable()) {
+    if (existsSync(encPath)) {
+      try {
+        const ciphertext = readFileSync(encPath);
+        const plaintext = safeStorage.decryptString(ciphertext);
+        const parsed = JSON.parse(plaintext) as Partial<AppSecrets>;
+        if (parsed.jwtSecret && parsed.encryptKey && parsed.hmacKey) {
+          // Clean up legacy plain file if it exists from an older build
+          if (existsSync(legacyPath)) {
+            try { require('fs').unlinkSync(legacyPath); } catch { /* ignore */ }
+          }
+          return parsed as AppSecrets;
+        }
+      } catch (e) {
+        console.warn('[main] Could not decrypt secrets file — regenerating', e);
+      }
+    }
+
+    // --- Generate and persist new secrets ---
+    const secrets: AppSecrets = {
+      jwtSecret: randomBytes(32).toString('hex'),
+      encryptKey: randomBytes(32).toString('hex'),
+      hmacKey: randomBytes(32).toString('hex'),
+    };
+    const ciphertext = safeStorage.encryptString(JSON.stringify(secrets));
+    writeFileSync(encPath, ciphertext, { mode: 0o600 });
+    // Remove any legacy plain file
+    if (existsSync(legacyPath)) {
+      try { require('fs').unlinkSync(legacyPath); } catch { /* ignore */ }
+    }
+    console.log('[main] Generated and securely stored app secrets (safeStorage)');
+    return secrets;
+  }
+
+  // --- safeStorage not available ---
+  if (!IS_DEV) {
+    // In a packaged build this should never happen on Windows 10+.
+    // Show a user-safe error and quit rather than silently using plaintext.
+    dialog.showErrorBox(
+      'MedOps — security error',
+      'OS-level encryption (safeStorage) is not available on this system.\n\n' +
+      'MedOps requires OS-level secret protection to start securely.\n' +
+      'Ensure you are running Windows 10 or later and that the user profile is not corrupted.',
+    );
+    app.quit();
+    // Unreachable after quit — satisfies TypeScript return type
+    return { jwtSecret: '', encryptKey: '', hmacKey: '' };
+  }
+
+  // Dev-mode only: plain JSON fallback so developers can run without packaging
+  if (existsSync(legacyPath)) {
     try {
-      const raw = JSON.parse(readFileSync(secretsPath, 'utf8')) as Partial<AppSecrets>;
+      const raw = JSON.parse(readFileSync(legacyPath, 'utf8')) as Partial<AppSecrets>;
       if (raw.jwtSecret && raw.encryptKey && raw.hmacKey) {
         return raw as AppSecrets;
       }
-    } catch {
-      // Corrupt file — fall through to regenerate
-      console.warn('[main] Corrupt secrets file — regenerating');
-    }
+    } catch { /* regenerate */ }
   }
-  const secrets: AppSecrets = {
+  const devSecrets: AppSecrets = {
     jwtSecret: randomBytes(32).toString('hex'),
     encryptKey: randomBytes(32).toString('hex'),
     hmacKey: randomBytes(32).toString('hex'),
   };
-  // mode 0o600: owner read/write only — no world/group access
-  writeFileSync(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
-  console.log('[main] Generated and stored app secrets for first run');
-  return secrets;
+  writeFileSync(legacyPath, JSON.stringify(devSecrets), { mode: 0o600 });
+  console.log('[main] Dev mode: stored secrets in plain JSON (safeStorage not available)');
+  return devSecrets;
 }
 
 async function stopBackend(): Promise<void> {

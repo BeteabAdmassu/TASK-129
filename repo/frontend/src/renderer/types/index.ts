@@ -114,7 +114,7 @@ export interface WorkOrder {
   trade: string;
   priority: 'urgent' | 'high' | 'normal';
   sla_deadline: string;
-  status: string;
+  status: 'submitted' | 'dispatched' | 'in_progress' | 'completed' | 'closed' | 'cancelled';
   description: string;
   location: string;
   parts_cost: number;

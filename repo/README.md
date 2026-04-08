@@ -48,7 +48,7 @@ The seed admin account is created automatically by database migration `000001_in
 | Username | `admin`        |
 | Password | `AdminPass1234`|
 
-**Change the admin password immediately after first login.** No `ADMIN_PASSWORD` environment variable is required — the seed hash is embedded in the migration file.
+**The application forces a password change on first login.** The seed hash is embedded in the migration file (`000001_init.up.sql`) — no environment variable is needed.
 
 ### Running the Application
 
@@ -79,11 +79,13 @@ docker compose up --build -d
 |----------|---------|-------------|
 | `PORT` | `8080` | Backend API port |
 | `DATABASE_URL` | *(set in .env)* | PostgreSQL connection string |
-| `JWT_SECRET` | *(required — set in .env)* | JWT signing secret — **must be overridden in production** |
-| `ENCRYPT_KEY` | *(required — set in .env)* | 32-byte AES encryption key for sensitive fields — **must be overridden in production** |
-| `HMAC_SIGNING_KEY` | *(required — set in .env)* | HMAC key for statement export signing — **must be overridden in production** |
+| `JWT_SECRET` | *(auto-generated in desktop mode)* | JWT signing secret — set in `.env` for Docker/server deployments; auto-provisioned by Electron for packaged builds |
+| `ENCRYPT_KEY` | *(auto-generated in desktop mode)* | 32-byte AES encryption key for sensitive fields — set in `.env` for Docker/server deployments; auto-provisioned by Electron for packaged builds |
+| `HMAC_SIGNING_KEY` | *(auto-generated in desktop mode)* | HMAC key for statement export signing — set in `.env` for Docker/server deployments; auto-provisioned by Electron for packaged builds |
 | `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
 | `DATA_DIR` | `/data/medops` | Directory for managed file storage |
+
+> **Desktop mode (Electron packaged build)**: `JWT_SECRET`, `ENCRYPT_KEY`, and `HMAC_SIGNING_KEY` are **not** set manually. On first launch the Electron main process generates cryptographically random secrets and stores them encrypted via OS-level protection (Windows Data Protection API / `safeStorage`). The encrypted file lives at `<AppData>\MedOps Console\<userData>\.secrets.enc`. These secrets are loaded automatically on every subsequent launch and injected into the backend process environment — no manual configuration is required.
 
 ## Project Structure
 

@@ -553,3 +553,80 @@ func TestExtractPackageVersion_FallbackWhenMissing(t *testing.T) {
 	}
 }
 
+// ─── helpers for cancelled-status tests ──────────────────────────────────────
+
+func echoCtxWithBody(method, path, userID, role, jsonBody string) (echo.Context, *httptest.ResponseRecorder) {
+	e := echo.New()
+	req := httptest.NewRequest(method, path, strings.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set("user_id", userID)
+	c.Set("user_role", role)
+	return c, rec
+}
+
+func strPtr(s string) *string { return &s }
+
+// ─── cancelled status tests ───────────────────────────────────────────────────
+
+// TestUpdateWorkOrder_CancelledStatus_IsAccepted verifies that setting status
+// to "cancelled" is accepted by the UpdateWorkOrder handler (backend validStatuses).
+func TestUpdateWorkOrder_CancelledStatus_IsAccepted(t *testing.T) {
+	wo := &models.WorkOrder{ID: "wo-cancel-01", SubmittedBy: "uid-sub", AssignedTo: strPtr("uid-tech"), Status: "dispatched"}
+	store := &stubWorkOrderStore{wo: wo}
+	h := &WorkOrderHandler{repo: store}
+
+	body := `{"status":"cancelled"}`
+	c, rec := echoCtxWithBody(http.MethodPut, "/work-orders/wo-cancel-01", "uid-tech", "maintenance_tech", body)
+	c.SetParamNames("id")
+	c.SetParamValues("wo-cancel-01")
+
+	if err := h.UpdateWorkOrder(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200; got %d — body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCloseWorkOrder_CancelledOrder_IsRejected verifies that the close endpoint
+// rejects a work order that has already been cancelled.
+func TestCloseWorkOrder_CancelledOrder_IsRejected(t *testing.T) {
+	wo := &models.WorkOrder{ID: "wo-cancel-02", SubmittedBy: "uid-sub", Status: "cancelled"}
+	store := &stubWorkOrderStore{wo: wo}
+	h := &WorkOrderHandler{repo: store}
+
+	body := `{"parts_cost":0,"labor_cost":0}`
+	c, rec := echoCtxWithBody(http.MethodPost, "/work-orders/wo-cancel-02/close", "uid-tech", "maintenance_tech", body)
+	c.SetParamNames("id")
+	c.SetParamValues("wo-cancel-02")
+
+	if err := h.CloseWorkOrder(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for cancelled order; got %d", rec.Code)
+	}
+}
+
+// TestUpdateWorkOrder_AdvanceFromCancelled_IsRejected verifies that a cancelled
+// work order cannot be advanced to another status (no resurrection).
+func TestUpdateWorkOrder_AdvanceFromCancelled_IsRejected(t *testing.T) {
+	wo := &models.WorkOrder{ID: "wo-cancel-03", SubmittedBy: "uid-sub", Status: "cancelled"}
+	store := &stubWorkOrderStore{wo: wo}
+	h := &WorkOrderHandler{repo: store}
+
+	body := `{"status":"in_progress"}`
+	c, rec := echoCtxWithBody(http.MethodPut, "/work-orders/wo-cancel-03", "uid-tech", "maintenance_tech", body)
+	c.SetParamNames("id")
+	c.SetParamValues("wo-cancel-03")
+
+	if err := h.UpdateWorkOrder(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 when advancing from cancelled; got %d — body: %s", rec.Code, rec.Body.String())
+	}
+}
+

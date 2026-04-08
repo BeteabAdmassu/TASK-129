@@ -30,7 +30,7 @@ const successStyle: React.CSSProperties = {
 };
 
 const priorityColors: Record<string, string> = { urgent: '#dc3545', high: '#fd7e14', normal: '#28a745' };
-const statusOptions = ['', 'submitted', 'dispatched', 'in_progress', 'completed', 'closed'];
+const statusOptions = ['', 'submitted', 'dispatched', 'in_progress', 'completed', 'closed', 'cancelled'];
 const priorityOptions = ['', 'urgent', 'high', 'normal'];
 const tradeOptions = ['electrical', 'plumbing', 'hvac', 'general'];
 
@@ -162,7 +162,7 @@ const WorkOrdersPage: React.FC = () => {
       key: 'sla_deadline', header: 'SLA Deadline', sortable: true,
       render: (wo: WorkOrder) => {
         const deadline = new Date(wo.sla_deadline);
-        const isBreached = deadline < new Date() && wo.status !== 'completed' && wo.status !== 'closed';
+        const isBreached = deadline < new Date() && wo.status !== 'completed' && wo.status !== 'closed' && wo.status !== 'cancelled';
         return <span style={{ color: isBreached ? '#dc3545' : '#333', fontWeight: isBreached ? 600 : 400 }}>
           {deadline.toLocaleDateString()} {deadline.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {isBreached && ' (BREACHED)'}

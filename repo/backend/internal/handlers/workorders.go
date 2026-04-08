@@ -321,6 +321,16 @@ func (h *WorkOrderHandler) UpdateWorkOrder(c echo.Context) error {
 	}
 
 	if body.Status != nil {
+		// Prevent status changes from terminal states
+		terminalStatuses := map[string]bool{"completed": true, "closed": true, "cancelled": true}
+		if terminalStatuses[wo.Status] {
+			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error:   "Validation failed",
+				Code:    http.StatusBadRequest,
+				Details: "Cannot change status of a completed, closed, or cancelled work order",
+			})
+		}
+
 		validStatuses := map[string]bool{
 			"submitted": true, "dispatched": true, "in_progress": true,
 			"completed": true, "closed": true, "cancelled": true,

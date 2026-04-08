@@ -164,7 +164,7 @@ const WorkOrderDetailPage: React.FC = () => {
 
   const deadline = new Date(order.sla_deadline);
   const now = new Date();
-  const isBreached = deadline < now && order.status !== 'completed' && order.status !== 'closed';
+  const isBreached = deadline < now && order.status !== 'completed' && order.status !== 'closed' && order.status !== 'cancelled';
   const remainingMs = deadline.getTime() - now.getTime();
   const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
   const remainingMins = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -203,7 +203,7 @@ const WorkOrderDetailPage: React.FC = () => {
           </div>
           {isBreached ? (
             <div style={{ color: '#dc3545', fontWeight: 700, fontSize: '0.9rem', marginTop: 4 }}>SLA BREACHED</div>
-          ) : order.status !== 'completed' && order.status !== 'closed' ? (
+          ) : order.status !== 'completed' && order.status !== 'closed' && order.status !== 'cancelled' ? (
             <div style={{ color: remainingMs < 3600000 ? '#fd7e14' : '#28a745', fontSize: '0.85rem', marginTop: 4 }}>
               {remainingHours > 0 ? `${remainingHours}h ${remainingMins}m remaining` : `${remainingMins}m remaining`}
             </div>
@@ -265,7 +265,7 @@ const WorkOrderDetailPage: React.FC = () => {
       </div>
 
       {/* Photos — view existing + attach new */}
-      {order.status !== 'closed' || photos.length > 0 ? (
+      {(order.status !== 'closed' && order.status !== 'cancelled') || photos.length > 0 ? (
         <div style={cardStyle}>
           <h3 style={{ margin: '0 0 1rem' }}>Photos {photos.length > 0 ? `(${photos.length})` : ''}</h3>
 
@@ -302,8 +302,8 @@ const WorkOrderDetailPage: React.FC = () => {
           )}
           {photos.length === 0 && <div style={{ color: '#999', marginBottom: '1rem', fontSize: '0.9rem' }}>No photos attached yet.</div>}
 
-          {/* Attach new photos (disabled when closed) */}
-          {order.status !== 'closed' && (
+          {/* Attach new photos (disabled when closed or cancelled) */}
+          {order.status !== 'closed' && order.status !== 'cancelled' && (
             <div style={{ borderTop: photos.length > 0 ? '1px solid #f0f0f0' : 'none', paddingTop: photos.length > 0 ? '1rem' : 0 }}>
               <div style={{ fontSize: '0.85rem', fontWeight: 500, marginBottom: '0.5rem', color: '#444' }}>Attach photos</div>
               {attachErr && <div style={{ color: '#dc3545', fontSize: '0.82rem', marginBottom: '0.5rem' }}>{attachErr}</div>}
@@ -330,7 +330,7 @@ const WorkOrderDetailPage: React.FC = () => {
       ) : null}
 
       {/* Maintenance Actions */}
-      {isMaintenance && order.status !== 'closed' && (
+      {isMaintenance && order.status !== 'closed' && order.status !== 'cancelled' && (
         <div style={cardStyle}>
           <h3 style={{ margin: '0 0 1rem' }}>Actions</h3>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
