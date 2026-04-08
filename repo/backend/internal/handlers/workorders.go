@@ -323,7 +323,7 @@ func (h *WorkOrderHandler) UpdateWorkOrder(c echo.Context) error {
 	if body.Status != nil {
 		validStatuses := map[string]bool{
 			"submitted": true, "dispatched": true, "in_progress": true,
-			"completed": true, "closed": true,
+			"completed": true, "closed": true, "cancelled": true,
 		}
 		if !validStatuses[*body.Status] {
 			return c.JSON(http.StatusBadRequest, models.ErrorResponse{
@@ -389,11 +389,11 @@ func (h *WorkOrderHandler) CloseWorkOrder(c echo.Context) error {
 		})
 	}
 
-	if wo.Status == "completed" || wo.Status == "closed" {
+	if wo.Status == "completed" || wo.Status == "closed" || wo.Status == "cancelled" {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
-			Error:   "Work order already closed",
+			Error:   "Work order already closed or cancelled",
 			Code:    http.StatusBadRequest,
-			Details: "This work order has already been completed or cancelled",
+			Details: "This work order has already been completed, closed, or cancelled",
 		})
 	}
 

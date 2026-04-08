@@ -249,11 +249,35 @@ func (h *FileHandler) ExportZip(c echo.Context) error {
 		})
 	}
 
+	// Object-level authorization: apply the same predicate as single-file download.
+	// Files the caller cannot access are silently skipped (no partial-403 leak).
+	userID := middleware.GetUserID(c)
+	role := middleware.GetUserRole(c)
+	var authorizedFiles []models.ManagedFile
+	for _, f := range files {
+		if canDownloadFile(userID, role, f.UploadedBy) {
+			authorizedFiles = append(authorizedFiles, f)
+		} else {
+			logrus.WithFields(logrus.Fields{
+				"user_id": userID,
+				"file_id": f.ID,
+			}).Warn("ZIP export: skipping file caller is not authorized to access")
+		}
+	}
+
+	if len(authorizedFiles) == 0 {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error:   "Access denied",
+			Code:    http.StatusForbidden,
+			Details: "You are not authorized to export any of the requested files",
+		})
+	}
+
 	// Create ZIP in memory
 	var buf bytes.Buffer
 	zipWriter := zip.NewWriter(&buf)
 
-	for _, f := range files {
+	for _, f := range authorizedFiles {
 		fileData, err := os.ReadFile(f.StoragePath)
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
@@ -283,9 +307,12 @@ func (h *FileHandler) ExportZip(c echo.Context) error {
 		})
 	}
 
-	userID := middleware.GetUserID(c)
+	exportedIDs := make([]string, len(authorizedFiles))
+	for i, f := range authorizedFiles {
+		exportedIDs[i] = f.ID
+	}
 	details, _ := json.Marshal(map[string]interface{}{
-		"file_ids": req.FileIDs,
+		"file_ids": exportedIDs,
 	})
 	h.repo.CreateAuditLog(&models.AuditLogEntry{
 		UserID:     userID,
@@ -297,7 +324,7 @@ func (h *FileHandler) ExportZip(c echo.Context) error {
 
 	logrus.WithFields(logrus.Fields{
 		"user_id":    userID,
-		"file_count": len(files),
+		"file_count": len(authorizedFiles),
 	}).Info("ZIP export created")
 
 	c.Response().Header().Set("Content-Type", "application/zip")

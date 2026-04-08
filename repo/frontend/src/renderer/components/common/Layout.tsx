@@ -70,12 +70,12 @@ const Layout: React.FC<Props> = ({ children }) => {
         return;
       }
 
-      // Ctrl+N — navigate to a create/new action (goes to current section list)
+      // Ctrl+N — trigger page-specific create action.
+      // Pages that support inline creation listen for 'medops:create-new' and open their modal.
+      // For pages without a listener the event is a no-op (no fallback navigation needed).
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault();
-        // Strip any trailing /:id to get the list route
-        const listPath = location.pathname.replace(/\/[^/]+$/, '') || location.pathname;
-        navigate(listPath);
+        window.dispatchEvent(new CustomEvent('medops:create-new'));
         return;
       }
 

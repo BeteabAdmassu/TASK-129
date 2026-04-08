@@ -14,7 +14,8 @@ import {
   Notification,
 } from 'electron';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { randomBytes } from 'crypto';
 import { spawn, ChildProcess } from 'child_process';
 import { setupTray, cleanupTray } from './tray';
 
@@ -105,6 +106,9 @@ function startBackend(): Promise<void> {
     const userDataDir = join(app.getPath('userData'), 'data');
     const migrationsPath = join(process.resourcesPath, 'backend', 'migrations');
 
+    // Ensure secrets exist before starting backend (generates on first run)
+    const secrets = ensureSecrets(app.getPath('userData'));
+
     let databaseUrl: string;
     try {
       databaseUrl = await startEmbeddedDatabase();
@@ -122,6 +126,10 @@ function startBackend(): Promise<void> {
         DATA_DIR: userDataDir,
         LOG_LEVEL: 'info',
         DATABASE_URL: databaseUrl,
+        JWT_SECRET: secrets.jwtSecret,
+        ENCRYPT_KEY: secrets.encryptKey,
+        HMAC_SIGNING_KEY: secrets.hmacKey,
+        TENANT_ID: 'default',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -165,6 +173,45 @@ function waitForBackend(maxAttempts: number, resolve: () => void, reject: (e: Er
     setTimeout(check, 1000);
   };
   check();
+}
+
+// ─── Secret bootstrap ─────────────────────────────────────────────────────────
+
+interface AppSecrets {
+  jwtSecret: string;
+  encryptKey: string;
+  hmacKey: string;
+}
+
+/**
+ * Ensures the three backend secrets (JWT_SECRET, ENCRYPT_KEY, HMAC_SIGNING_KEY)
+ * exist. On first run they are generated via crypto.randomBytes and persisted in
+ * a mode-0600 JSON file inside the app's userData directory. Subsequent starts
+ * load the stored values so secrets survive restarts without re-generation.
+ */
+function ensureSecrets(userDataDir: string): AppSecrets {
+  mkdirSync(userDataDir, { recursive: true });
+  const secretsPath = join(userDataDir, '.secrets.json');
+  if (existsSync(secretsPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(secretsPath, 'utf8')) as Partial<AppSecrets>;
+      if (raw.jwtSecret && raw.encryptKey && raw.hmacKey) {
+        return raw as AppSecrets;
+      }
+    } catch {
+      // Corrupt file — fall through to regenerate
+      console.warn('[main] Corrupt secrets file — regenerating');
+    }
+  }
+  const secrets: AppSecrets = {
+    jwtSecret: randomBytes(32).toString('hex'),
+    encryptKey: randomBytes(32).toString('hex'),
+    hmacKey: randomBytes(32).toString('hex'),
+  };
+  // mode 0o600: owner read/write only — no world/group access
+  writeFileSync(secretsPath, JSON.stringify(secrets), { mode: 0o600 });
+  console.log('[main] Generated and stored app secrets for first run');
+  return secrets;
 }
 
 async function stopBackend(): Promise<void> {

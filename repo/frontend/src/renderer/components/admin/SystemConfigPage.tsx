@@ -23,6 +23,10 @@ const SystemConfigPage: React.FC = () => {
   const [rollbackBusy, setRollbackBusy] = useState(false);
   const [confirmRollback, setConfirmRollback] = useState(false);
   const [actionStatus, setActionStatus] = useState<ActionStatus>(null);
+  // Update package import state
+  const [updateFile, setUpdateFile] = useState<File | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const updateInputRef = React.useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -80,6 +84,22 @@ const SystemConfigPage: React.FC = () => {
       setActionStatus({ type: 'error', message: err.response?.data?.error || 'Rollback failed.' });
     } finally {
       setRollbackBusy(false);
+    }
+  };
+
+  const handleApplyUpdate = async () => {
+    setUpdateBusy(true);
+    setActionStatus(null);
+    try {
+      const res = await systemAPI.applyUpdate(updateFile ?? undefined);
+      const { version, status } = res.data as { version: string; status: string };
+      setActionStatus({ type: 'success', message: `Update applied: version ${version} (${status}).` });
+      setUpdateFile(null);
+      if (updateInputRef.current) updateInputRef.current.value = '';
+    } catch (err: any) {
+      setActionStatus({ type: 'error', message: err.response?.data?.error || 'Update failed.' });
+    } finally {
+      setUpdateBusy(false);
     }
   };
 
@@ -187,6 +207,40 @@ const SystemConfigPage: React.FC = () => {
             }}
           >
             {rollbackBusy ? 'Rolling Back…' : 'Rollback System'}
+          </button>
+        </div>
+      </div>
+
+      {/* Offline update package import */}
+      <div style={cardStyle}>
+        <h2 style={{ margin: '0 0 0.5rem', fontSize: '1rem', color: '#333' }}>Apply Offline Update</h2>
+        <p style={{ margin: '0 0 1rem', fontSize: '0.85rem', color: '#666' }}>
+          Import an update package (.zip or .sql) distributed offline. Migrations run automatically.
+          Leave the file picker empty to apply a pre-staged package from the server data directory.
+        </p>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            ref={updateInputRef}
+            type="file"
+            accept=".zip,.sql"
+            onChange={e => setUpdateFile(e.target.files?.[0] ?? null)}
+            style={{ fontSize: '0.875rem' }}
+          />
+          <button
+            onClick={handleApplyUpdate}
+            disabled={updateBusy}
+            style={{
+              padding: '0.6rem 1.2rem',
+              backgroundColor: updateBusy ? '#9e9e9e' : '#00695c',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 4,
+              cursor: updateBusy ? 'not-allowed' : 'pointer',
+              fontWeight: 500,
+              fontSize: '0.875rem',
+            }}
+          >
+            {updateBusy ? 'Applying…' : updateFile ? `Apply "${updateFile.name}"` : 'Apply Pre-staged Update'}
           </button>
         </div>
       </div>

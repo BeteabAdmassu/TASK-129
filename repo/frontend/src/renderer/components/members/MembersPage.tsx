@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { membersAPI } from '../../services/api';
 import { useFetch } from '../../hooks/useFetch';
@@ -47,6 +47,13 @@ const MembersPage: React.FC = () => {
     () => membersAPI.listTiers().then(r => ({ data: r.data.data || r.data })),
     []
   );
+
+  // Ctrl+N shortcut: open create modal
+  useEffect(() => {
+    const handler = () => setShowCreate(true);
+    window.addEventListener('medops:create-new', handler);
+    return () => window.removeEventListener('medops:create-new', handler);
+  }, []);
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);

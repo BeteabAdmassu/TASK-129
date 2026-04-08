@@ -7,15 +7,16 @@ import (
 )
 
 type User struct {
-	ID             string     `json:"id"`
-	Username       string     `json:"username"`
-	PasswordHash   string     `json:"-"`
-	Role           string     `json:"role"`
-	FailedAttempts int        `json:"failed_attempts"`
-	LockedUntil    *time.Time `json:"locked_until,omitempty"`
-	IsActive       bool       `json:"is_active"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID                 string     `json:"id"`
+	Username           string     `json:"username"`
+	PasswordHash       string     `json:"-"`
+	Role               string     `json:"role"`
+	FailedAttempts     int        `json:"failed_attempts"`
+	LockedUntil        *time.Time `json:"locked_until,omitempty"`
+	IsActive           bool       `json:"is_active"`
+	MustChangePassword bool       `json:"must_change_password"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 type Role struct {

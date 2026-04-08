@@ -17,6 +17,7 @@ import MemberDetailPage from './components/members/MemberDetailPage';
 import RateTablesPage from './components/charges/RateTablesPage';
 import StatementsPage from './components/charges/StatementsPage';
 import SystemConfigPage from './components/admin/SystemConfigPage';
+import ForcePasswordChangePage from './components/admin/ForcePasswordChangePage';
 
 /** Returns the role list for a given path from the canonical ROUTE_CONFIG. */
 function routeRoles(path: string): string[] {
@@ -24,14 +25,16 @@ function routeRoles(path: string): string[] {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (user?.must_change_password) return <ForcePasswordChangePage />;
   return <Layout>{children}</Layout>;
 }
 
 function RoleRoute({ children, roles }: { children: React.ReactNode; roles: string[] }) {
   const { user, isAuthenticated } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (user?.must_change_password) return <ForcePasswordChangePage />;
   if (user && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return <Layout>{children}</Layout>;
 }

@@ -224,6 +224,7 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 	}
 
 	user.PasswordHash = string(hash)
+	user.MustChangePassword = false // clear forced-reset flag on successful change
 	user.UpdatedAt = time.Now()
 	if err := h.repo.UpdateUser(user); err != nil {
 		logrus.WithError(err).Error("Failed to update user password")

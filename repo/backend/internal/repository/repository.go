@@ -82,9 +82,9 @@ func (r *Repository) decryptDecimal(data []byte) (float64, error) {
 func (r *Repository) GetUserByUsername(username string) (*models.User, error) {
 	u := &models.User{}
 	err := r.DB.QueryRow(
-		`SELECT id, username, password_hash, role, failed_attempts, locked_until, is_active, created_at, updated_at
+		`SELECT id, username, password_hash, role, failed_attempts, locked_until, is_active, must_change_password, created_at, updated_at
 		 FROM auth_users WHERE username = $1 AND tenant_id = $2`, username, r.tenantID,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -98,9 +98,9 @@ func (r *Repository) GetUserByUsername(username string) (*models.User, error) {
 func (r *Repository) GetUserByID(id string) (*models.User, error) {
 	u := &models.User{}
 	err := r.DB.QueryRow(
-		`SELECT id, username, password_hash, role, failed_attempts, locked_until, is_active, created_at, updated_at
+		`SELECT id, username, password_hash, role, failed_attempts, locked_until, is_active, must_change_password, created_at, updated_at
 		 FROM auth_users WHERE id = $1 AND tenant_id = $2`, id, r.tenantID,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -119,9 +119,9 @@ func (r *Repository) CreateUser(user *models.User) error {
 	user.CreatedAt = now
 	user.UpdatedAt = now
 	_, err := r.DB.Exec(
-		`INSERT INTO auth_users (id, username, password_hash, role, failed_attempts, locked_until, is_active, created_at, updated_at, tenant_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		user.ID, user.Username, user.PasswordHash, user.Role, user.FailedAttempts, user.LockedUntil, user.IsActive, user.CreatedAt, user.UpdatedAt, r.tenantID,
+		`INSERT INTO auth_users (id, username, password_hash, role, failed_attempts, locked_until, is_active, must_change_password, created_at, updated_at, tenant_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		user.ID, user.Username, user.PasswordHash, user.Role, user.FailedAttempts, user.LockedUntil, user.IsActive, user.MustChangePassword, user.CreatedAt, user.UpdatedAt, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("create user: %w", err)
@@ -133,8 +133,8 @@ func (r *Repository) CreateUser(user *models.User) error {
 func (r *Repository) UpdateUser(user *models.User) error {
 	user.UpdatedAt = time.Now()
 	_, err := r.DB.Exec(
-		`UPDATE auth_users SET username=$1, password_hash=$2, role=$3, is_active=$4, updated_at=$5 WHERE id=$6 AND tenant_id=$7`,
-		user.Username, user.PasswordHash, user.Role, user.IsActive, user.UpdatedAt, user.ID, r.tenantID,
+		`UPDATE auth_users SET username=$1, password_hash=$2, role=$3, is_active=$4, must_change_password=$5, updated_at=$6 WHERE id=$7 AND tenant_id=$8`,
+		user.Username, user.PasswordHash, user.Role, user.IsActive, user.MustChangePassword, user.UpdatedAt, user.ID, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("update user: %w", err)
@@ -145,7 +145,7 @@ func (r *Repository) UpdateUser(user *models.User) error {
 // ListUsers returns all users.
 func (r *Repository) ListUsers() ([]models.User, error) {
 	rows, err := r.DB.Query(
-		`SELECT id, username, password_hash, role, failed_attempts, locked_until, is_active, created_at, updated_at
+		`SELECT id, username, password_hash, role, failed_attempts, locked_until, is_active, must_change_password, created_at, updated_at
 		 FROM auth_users WHERE tenant_id = $1 ORDER BY created_at DESC`, r.tenantID,
 	)
 	if err != nil {
@@ -156,7 +156,7 @@ func (r *Repository) ListUsers() ([]models.User, error) {
 	var users []models.User
 	for rows.Next() {
 		var u models.User
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("list users scan: %w", err)
 		}
 		users = append(users, u)
@@ -872,7 +872,7 @@ func (r *Repository) UpdateWorkOrder(wo *models.WorkOrder) error {
 func (r *Repository) GetTechnicianWithLeastOrders(trade string) (*models.User, error) {
 	u := &models.User{}
 	err := r.DB.QueryRow(
-		`SELECT u.id, u.username, u.password_hash, u.role, u.failed_attempts, u.locked_until, u.is_active, u.created_at, u.updated_at
+		`SELECT u.id, u.username, u.password_hash, u.role, u.failed_attempts, u.locked_until, u.is_active, u.must_change_password, u.created_at, u.updated_at
 		 FROM auth_users u
 		 WHERE u.role = 'maintenance_tech' AND u.is_active = true
 		 ORDER BY (
@@ -881,7 +881,7 @@ func (r *Repository) GetTechnicianWithLeastOrders(trade string) (*models.User, e
 		     AND wo.tenant_id = $1
 		 ) ASC
 		 LIMIT 1`, r.tenantID,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.FailedAttempts, &u.LockedUntil, &u.IsActive, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { workOrdersAPI, filesAPI } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
@@ -61,6 +61,13 @@ const WorkOrdersPage: React.FC = () => {
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createSuccess, setCreateSuccess] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+
+  // Ctrl+N shortcut: open create modal
+  useEffect(() => {
+    const handler = () => setShowCreate(true);
+    window.addEventListener('medops:create-new', handler);
+    return () => window.removeEventListener('medops:create-new', handler);
+  }, []);
 
   // Draft auto-save: saves create form state every 30s
   const { clearDraft } = useDraftAutoSave('work_order', 'default', createForm);
@@ -246,7 +253,7 @@ const WorkOrdersPage: React.FC = () => {
           {
             label: 'Close Order',
             onClick: () => handleClose(ctxMenu.order),
-            disabled: !isMaintenance || ctxMenu.order.status !== 'completed',
+            disabled: !isMaintenance || !['submitted', 'dispatched', 'in_progress'].includes(ctxMenu.order.status),
           },
           {
             label: 'Cancel / Void',

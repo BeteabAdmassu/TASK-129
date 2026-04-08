@@ -1,4 +1,4 @@
-import React, { useState, FormEvent } from 'react';
+import React, { useState, FormEvent, useEffect } from 'react';
 import { usersAPI } from '../../services/api';
 import { useFetch } from '../../hooks/useFetch';
 import type { User } from '../../types';
@@ -23,6 +23,13 @@ const UsersPage: React.FC = () => {
     []
   );
   const users: User[] = Array.isArray(usersData) ? usersData : (usersData as any)?.data || [];
+
+  // Ctrl+N shortcut: open create modal
+  useEffect(() => {
+    const handler = () => setShowCreate(true);
+    window.addEventListener('medops:create-new', handler);
+    return () => window.removeEventListener('medops:create-new', handler);
+  }, []);
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);

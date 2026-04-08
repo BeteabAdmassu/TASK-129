@@ -183,7 +183,14 @@ export const systemAPI = {
   backupStatus: () => api.get('/system/backup/status'),
   getConfig: () => api.get('/system/config'),
   updateConfig: (key: string, value: string) => api.put('/system/config', { key, value }),
-  applyUpdate: () => api.post('/system/update'),
+  applyUpdate: (file?: File) => {
+    if (file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      return api.post('/system/update', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    }
+    return api.post('/system/update');
+  },
   rollback: () => api.post('/system/rollback'),
 };
 

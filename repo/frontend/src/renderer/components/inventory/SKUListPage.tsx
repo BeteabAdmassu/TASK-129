@@ -1,4 +1,4 @@
-import React, { useState, FormEvent, useCallback } from 'react';
+import React, { useState, FormEvent, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { skusAPI, inventoryAPI } from '../../services/api';
 import { useFetch } from '../../hooks/useFetch';
@@ -27,6 +27,13 @@ const SKUListPage: React.FC = () => {
 
   const skus = data?.data || [];
   const total = data?.total || 0;
+
+  // Ctrl+N shortcut: open create modal
+  useEffect(() => {
+    const handler = () => setShowCreate(true);
+    window.addEventListener('medops:create-new', handler);
+    return () => window.removeEventListener('medops:create-new', handler);
+  }, []);
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
