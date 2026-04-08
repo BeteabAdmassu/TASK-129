@@ -388,6 +388,84 @@ func TestImportContent_MissingChapterID_Returns400(t *testing.T) {
 	}
 }
 
+// ─── parseSessionExpiresAt tests ─────────────────────────────────────────────
+// These cover the date-parsing fix for CreateSessionPackageHandler: the frontend
+// <input type="date"> sends YYYY-MM-DD which encoding/json cannot unmarshal into
+// time.Time directly, so we parse it manually via parseSessionExpiresAt.
+
+func TestParseSessionExpiresAt_DateOnly_ParsesUTCMidnight(t *testing.T) {
+	got, err := parseSessionExpiresAt("2026-12-31")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Year() != 2026 || got.Month() != 12 || got.Day() != 31 {
+		t.Errorf("wrong date: %v", got)
+	}
+	if got.UTC().Hour() != 0 || got.UTC().Minute() != 0 || got.UTC().Second() != 0 {
+		t.Errorf("expected UTC midnight, got %v", got.UTC())
+	}
+	if got.Location() != time.UTC {
+		t.Errorf("expected UTC location, got %v", got.Location())
+	}
+}
+
+func TestParseSessionExpiresAt_RFC3339_Preserved(t *testing.T) {
+	input := "2026-06-15T14:30:00Z"
+	got, err := parseSessionExpiresAt(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Year() != 2026 || got.Month() != 6 || got.Day() != 15 {
+		t.Errorf("wrong date parsed from RFC3339: %v", got)
+	}
+	if got.UTC().Hour() != 14 || got.UTC().Minute() != 30 {
+		t.Errorf("wrong time from RFC3339: %v", got.UTC())
+	}
+}
+
+func TestParseSessionExpiresAt_RFC3339WithOffset_Preserved(t *testing.T) {
+	// Non-UTC offset should also be accepted
+	input := "2027-03-01T09:00:00+05:30"
+	got, err := parseSessionExpiresAt(input)
+	if err != nil {
+		t.Fatalf("unexpected error for RFC3339 with offset: %v", err)
+	}
+	if got.IsZero() {
+		t.Error("expected non-zero time")
+	}
+}
+
+func TestParseSessionExpiresAt_InvalidFormat_ReturnsError(t *testing.T) {
+	cases := []string{
+		"31-12-2026",   // DD-MM-YYYY — wrong order
+		"2026/12/31",   // slashes instead of dashes
+		"December 31",  // natural language
+		"",             // empty (caller validates separately, but function itself should error)
+		"2026-13-01",   // month 13 is invalid
+	}
+	for _, tc := range cases {
+		_, err := parseSessionExpiresAt(tc)
+		if err == nil {
+			t.Errorf("expected error for input %q, got nil", tc)
+		}
+	}
+}
+
+func TestParseSessionExpiresAt_InvalidFormat_ErrorMessageIsHelpful(t *testing.T) {
+	_, err := parseSessionExpiresAt("31/12/2026")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if msg == "" {
+		t.Error("error message should not be empty")
+	}
+	// Message should mention accepted formats
+	if !strings.Contains(msg, "YYYY-MM-DD") || !strings.Contains(msg, "RFC3339") {
+		t.Errorf("error message should mention accepted formats, got: %s", msg)
+	}
+}
+
 func TestImportContent_MissingFile_Returns400(t *testing.T) {
 	e := echo.New()
 	body := "--boundary\r\nContent-Disposition: form-data; name=\"category\"\r\n\r\nPharmacology\r\n" +

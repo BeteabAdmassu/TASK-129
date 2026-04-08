@@ -846,11 +846,17 @@ func (h *SystemHandler) SaveDraft(c echo.Context) error {
 		})
 	}
 
+	// Normalize nil form_id to "default" so the unique index (user_id, form_type, form_id)
+	// always has a non-NULL key and ON CONFLICT deduplication works correctly.
+	formIDVal := "default"
+	if req.FormID != nil && *req.FormID != "" {
+		formIDVal = *req.FormID
+	}
 	draft := &models.DraftCheckpoint{
 		ID:        uuid.New().String(),
 		UserID:    userID,
 		FormType:  formType,
-		FormID:    req.FormID,
+		FormID:    &formIDVal,
 		StateJSON: req.StateJSON,
 		SavedAt:   time.Now(),
 	}

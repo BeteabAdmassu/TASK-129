@@ -881,7 +881,7 @@ func (r *Repository) GetTechnicianWithLeastOrders(trade string) (*models.User, e
 	err := r.DB.QueryRow(
 		`SELECT u.id, u.username, u.password_hash, u.role, u.failed_attempts, u.locked_until, u.is_active, u.must_change_password, u.created_at, u.updated_at
 		 FROM auth_users u
-		 WHERE u.role = 'maintenance_tech' AND u.is_active = true
+		 WHERE u.role = 'maintenance_tech' AND u.is_active = true AND u.tenant_id = $1
 		 ORDER BY (
 		   SELECT COUNT(*) FROM work_orders wo
 		   WHERE wo.assigned_to = u.id AND wo.status IN ('submitted', 'dispatched', 'in_progress')
@@ -1081,9 +1081,9 @@ func (r *Repository) UpdateMember(m *models.Member) error {
 		return fmt.Errorf("update member: encrypt stored_value: %w", err)
 	}
 	_, err = r.DB.Exec(
-		`UPDATE members SET name=$1, id_number_encrypted=$2, phone=$3, tier_id=$4, points_balance=$5, stored_value=0, stored_value_encrypted=$6, status=$7, frozen_at=$8, expires_at=$9, tenant_id=$10
-		 WHERE id=$11`,
-		m.Name, m.IDNumberEncrypted, m.Phone, m.TierID, m.PointsBalance, encSV, m.Status, m.FrozenAt, m.ExpiresAt, r.tenantID, m.ID,
+		`UPDATE members SET name=$1, id_number_encrypted=$2, phone=$3, tier_id=$4, points_balance=$5, stored_value=0, stored_value_encrypted=$6, status=$7, frozen_at=$8, expires_at=$9
+		 WHERE id=$10 AND tenant_id=$11`,
+		m.Name, m.IDNumberEncrypted, m.Phone, m.TierID, m.PointsBalance, encSV, m.Status, m.FrozenAt, m.ExpiresAt, m.ID, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("update member: %w", err)

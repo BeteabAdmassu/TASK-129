@@ -43,6 +43,11 @@ const mockSystemHealth = vi.hoisted(() =>
 const mockLearningExport = vi.hoisted(() => vi.fn());
 const mockFilesUpload = vi.hoisted(() => vi.fn());
 const mockWorkOrdersLinkPhoto = vi.hoisted(() => vi.fn());
+const mockMembersGet = vi.hoisted(() => vi.fn());
+const mockMembersTransactions = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ data: { data: [], total: 0 } })
+);
+const mockMembersCreatePackage = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/api', () => ({
   // Default export: the raw axios instance used directly by DraftRecoveryDialog.
@@ -65,6 +70,14 @@ vi.mock('../services/api', () => ({
     listMembers: vi.fn(),
     getMember: vi.fn(),
     list: vi.fn().mockResolvedValue({ data: { data: [], total: 0 } }),
+    get: mockMembersGet,
+    transactions: mockMembersTransactions,
+    createPackage: mockMembersCreatePackage,
+    freeze: vi.fn(),
+    unfreeze: vi.fn(),
+    redeem: vi.fn(),
+    addValue: vi.fn(),
+    refund: vi.fn(),
   },
   usersAPI: {
     list: mockUsersList,
@@ -540,5 +553,235 @@ describe('LearningPage — export format selector passes correct format', () => 
     await waitFor(() => {
       expect(mockLearningExport).toHaveBeenCalledWith('kp-1', 'html');
     });
+  });
+});
+
+// ─── MemberDetailPage — session package create flow ──────────────────────────
+
+import MemberDetailPage from '../components/members/MemberDetailPage';
+
+const baseMember = {
+  id: 'mem-001',
+  name: 'Alice Smith',
+  phone: '+1-555-0100',
+  tier_id: 'tier-gold',
+  points_balance: 500,
+  stored_value: 25.0,
+  status: 'active' as const,
+  expires_at: new Date(Date.now() + 86400000 * 365).toISOString(),
+  created_at: new Date().toISOString(),
+};
+
+const futureDate = new Date(Date.now() + 86400000 * 60).toISOString().slice(0, 10); // 60 days from now
+
+function renderMemberDetail(memberId = 'mem-001') {
+  return render(
+    <MemoryRouter initialEntries={[`/members/${memberId}`]}>
+      <Routes>
+        <Route path="/members/:id" element={<MemberDetailPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe('MemberDetailPage — session package create flow', () => {
+  beforeEach(() => {
+    mockUseAuth.isAuthenticated = true;
+    mockUseAuth.user = { id: 'u-1', username: 'frontdesk', role: 'front_desk' };
+    mockMembersGet.mockReset();
+    mockMembersTransactions.mockReset();
+    mockMembersCreatePackage.mockReset();
+
+    // Default: member with no packages
+    mockMembersGet.mockResolvedValue({
+      data: { ...baseMember, packages: [] },
+    });
+    mockMembersTransactions.mockResolvedValue({ data: { data: [], total: 0 } });
+  });
+
+  it('renders "Add Package" button and shows create form when clicked', async () => {
+    renderMemberDetail();
+
+    await waitFor(() => screen.getByText('Alice Smith'));
+
+    const addBtn = screen.getByRole('button', { name: /add package/i });
+    expect(addBtn).toBeTruthy();
+    fireEvent.click(addBtn);
+
+    expect(screen.getByTestId('pkg-name-input')).toBeTruthy();
+    expect(screen.getByTestId('pkg-sessions-input')).toBeTruthy();
+    expect(screen.getByTestId('pkg-expires-input')).toBeTruthy();
+    expect(screen.getByTestId('pkg-create-submit')).toBeTruthy();
+  });
+
+  it('shows validation error when package name is empty', async () => {
+    renderMemberDetail();
+    await waitFor(() => screen.getByText('Alice Smith'));
+
+    fireEvent.click(screen.getByRole('button', { name: /add package/i }));
+
+    // Leave name empty, fill sessions and date
+    fireEvent.change(screen.getByTestId('pkg-sessions-input'), { target: { value: '5' } });
+    fireEvent.change(screen.getByTestId('pkg-expires-input'), { target: { value: futureDate } });
+    fireEvent.click(screen.getByTestId('pkg-create-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pkg-create-error').textContent).toMatch(/name is required/i);
+    });
+    expect(mockMembersCreatePackage).not.toHaveBeenCalled();
+  });
+
+  it('shows validation error when total_sessions is not a positive integer', async () => {
+    renderMemberDetail();
+    await waitFor(() => screen.getByText('Alice Smith'));
+
+    fireEvent.click(screen.getByRole('button', { name: /add package/i }));
+
+    fireEvent.change(screen.getByTestId('pkg-name-input'), { target: { value: 'Test Pack' } });
+    fireEvent.change(screen.getByTestId('pkg-sessions-input'), { target: { value: '0' } });
+    fireEvent.change(screen.getByTestId('pkg-expires-input'), { target: { value: futureDate } });
+    fireEvent.click(screen.getByTestId('pkg-create-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pkg-create-error').textContent).toMatch(/positive integer/i);
+    });
+    expect(mockMembersCreatePackage).not.toHaveBeenCalled();
+  });
+
+  it('shows validation error when expires_at is in the past', async () => {
+    renderMemberDetail();
+    await waitFor(() => screen.getByText('Alice Smith'));
+
+    fireEvent.click(screen.getByRole('button', { name: /add package/i }));
+
+    fireEvent.change(screen.getByTestId('pkg-name-input'), { target: { value: 'Test Pack' } });
+    fireEvent.change(screen.getByTestId('pkg-sessions-input'), { target: { value: '5' } });
+    fireEvent.change(screen.getByTestId('pkg-expires-input'), { target: { value: '2020-01-01' } });
+    fireEvent.click(screen.getByTestId('pkg-create-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pkg-create-error').textContent).toMatch(/future/i);
+    });
+    expect(mockMembersCreatePackage).not.toHaveBeenCalled();
+  });
+
+  it('calls createPackage with correct payload and appends package on success', async () => {
+    const createdPkg = {
+      id: 'pkg-new-1',
+      member_id: 'mem-001',
+      package_name: 'Gold Pack',
+      total_sessions: 10,
+      remaining_sessions: 10,
+      expires_at: new Date(Date.now() + 86400000 * 60).toISOString(),
+    };
+    mockMembersCreatePackage.mockResolvedValueOnce({ data: createdPkg });
+
+    renderMemberDetail();
+    await waitFor(() => screen.getByText('Alice Smith'));
+
+    fireEvent.click(screen.getByRole('button', { name: /add package/i }));
+
+    fireEvent.change(screen.getByTestId('pkg-name-input'), { target: { value: 'Gold Pack' } });
+    fireEvent.change(screen.getByTestId('pkg-sessions-input'), { target: { value: '10' } });
+    fireEvent.change(screen.getByTestId('pkg-expires-input'), { target: { value: futureDate } });
+    fireEvent.click(screen.getByTestId('pkg-create-submit'));
+
+    await waitFor(() => {
+      expect(mockMembersCreatePackage).toHaveBeenCalledWith('mem-001', {
+        package_name: 'Gold Pack',
+        total_sessions: 10,
+        expires_at: futureDate,
+      });
+    });
+
+    // Package appears in the list
+    await waitFor(() => {
+      expect(screen.getByText('Gold Pack')).toBeTruthy();
+    });
+
+    // Form is hidden after success
+    expect(screen.queryByTestId('pkg-name-input')).toBeNull();
+  });
+
+  it('disables submit button while create request is in flight', async () => {
+    let resolveCreate!: (v: unknown) => void;
+    mockMembersCreatePackage.mockReturnValueOnce(
+      new Promise(res => { resolveCreate = res; })
+    );
+
+    renderMemberDetail();
+    await waitFor(() => screen.getByText('Alice Smith'));
+
+    fireEvent.click(screen.getByRole('button', { name: /add package/i }));
+
+    fireEvent.change(screen.getByTestId('pkg-name-input'), { target: { value: 'Pack A' } });
+    fireEvent.change(screen.getByTestId('pkg-sessions-input'), { target: { value: '5' } });
+    fireEvent.change(screen.getByTestId('pkg-expires-input'), { target: { value: futureDate } });
+    fireEvent.click(screen.getByTestId('pkg-create-submit'));
+
+    // While request is pending the button is disabled
+    await waitFor(() => {
+      const btn = screen.getByTestId('pkg-create-submit') as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+      expect(btn.textContent).toMatch(/creating/i);
+    });
+
+    // Resolve the request
+    resolveCreate({ data: { id: 'p1', member_id: 'mem-001', package_name: 'Pack A', total_sessions: 5, remaining_sessions: 5, expires_at: new Date(Date.now() + 86400000 * 60).toISOString() } });
+  });
+
+  it('shows API error message when createPackage fails', async () => {
+    mockMembersCreatePackage.mockRejectedValueOnce({
+      response: { data: { error: 'Member not found in tenant' } },
+    });
+
+    renderMemberDetail();
+    await waitFor(() => screen.getByText('Alice Smith'));
+
+    fireEvent.click(screen.getByRole('button', { name: /add package/i }));
+
+    fireEvent.change(screen.getByTestId('pkg-name-input'), { target: { value: 'Bad Pack' } });
+    fireEvent.change(screen.getByTestId('pkg-sessions-input'), { target: { value: '3' } });
+    fireEvent.change(screen.getByTestId('pkg-expires-input'), { target: { value: futureDate } });
+    fireEvent.click(screen.getByTestId('pkg-create-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pkg-create-error').textContent).toMatch(/member not found in tenant/i);
+    });
+  });
+
+  it('shows existing packages from member detail response with status badges', async () => {
+    const activePkg = {
+      id: 'pkg-a',
+      member_id: 'mem-001',
+      package_name: 'Active Pack',
+      total_sessions: 5,
+      remaining_sessions: 3,
+      expires_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+    };
+    const depletedPkg = {
+      id: 'pkg-b',
+      member_id: 'mem-001',
+      package_name: 'Used Pack',
+      total_sessions: 5,
+      remaining_sessions: 0,
+      expires_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+    };
+
+    mockMembersGet.mockResolvedValueOnce({
+      data: { ...baseMember, packages: [activePkg, depletedPkg] },
+    });
+
+    renderMemberDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText('Active Pack')).toBeTruthy();
+      expect(screen.getByText('Used Pack')).toBeTruthy();
+    });
+
+    // Status badges — 'active' appears on both member status and package badge
+    const activeBadges = screen.getAllByText('active');
+    expect(activeBadges.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('depleted')).toBeTruthy();
   });
 });

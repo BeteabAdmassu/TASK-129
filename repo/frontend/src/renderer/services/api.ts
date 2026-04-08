@@ -144,6 +144,10 @@ export const membersAPI = {
     api.post(`/members/${id}/refund`, data),
   transactions: (id: string, params?: { page?: number; page_size?: number }) =>
     api.get(`/members/${id}/transactions`, { params }),
+  listPackages: (id: string) =>
+    api.get(`/members/${id}/packages`),
+  createPackage: (id: string, data: { package_name: string; total_sessions: number; expires_at: string }) =>
+    api.post(`/members/${id}/packages`, data),
   listTiers: () => api.get('/membership-tiers'),
 };
 

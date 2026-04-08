@@ -66,6 +66,12 @@ const MemberDetailPage: React.FC = () => {
   // Session packages (loaded with member detail)
   const [packages, setPackages] = useState<SessionPackage[]>([]);
 
+  // Create package form
+  const [showCreatePkg, setShowCreatePkg] = useState(false);
+  const [createPkgForm, setCreatePkgForm] = useState({ package_name: '', total_sessions: '', expires_at: '' });
+  const [createPkgErr, setCreatePkgErr] = useState('');
+  const [createPkgSubmitting, setCreatePkgSubmitting] = useState(false);
+
   // Transactions
   const [transactions, setTransactions] = useState<MemberTransaction[]>([]);
   const [txPage, setTxPage] = useState(1);
@@ -247,6 +253,33 @@ const MemberDetailPage: React.FC = () => {
     }
   };
 
+  // Create session package
+  const handleCreatePackage = async () => {
+    const name = createPkgForm.package_name.trim();
+    const sessions = parseInt(createPkgForm.total_sessions, 10);
+    const expiresAt = createPkgForm.expires_at;
+
+    if (!name) { setCreatePkgErr('Package name is required'); return; }
+    if (isNaN(sessions) || sessions <= 0) { setCreatePkgErr('Total sessions must be a positive integer'); return; }
+    if (!expiresAt) { setCreatePkgErr('Expiry date is required'); return; }
+    if (new Date(expiresAt) <= new Date()) { setCreatePkgErr('Expiry date must be in the future'); return; }
+
+    setCreatePkgSubmitting(true);
+    setCreatePkgErr('');
+    try {
+      const r = await membersAPI.createPackage(id!, { package_name: name, total_sessions: sessions, expires_at: expiresAt });
+      const newPkg: SessionPackage = r.data;
+      setPackages(prev => [...prev, newPkg]);
+      setCreatePkgForm({ package_name: '', total_sessions: '', expires_at: '' });
+      setShowCreatePkg(false);
+      showSuccess(`Session package "${name}" created`);
+    } catch (e: any) {
+      setCreatePkgErr(e.response?.data?.error || 'Failed to create session package');
+    } finally {
+      setCreatePkgSubmitting(false);
+    }
+  };
+
   const txColumns = [
     { key: 'created_at', header: 'Date', sortable: true, render: (t: MemberTransaction) => new Date(t.created_at).toLocaleString() },
     { key: 'type', header: 'Type', sortable: true, render: (t: MemberTransaction) => <span style={{ textTransform: 'capitalize' as const }}>{t.type.replace(/_/g, ' ')}</span> },
@@ -327,16 +360,91 @@ const MemberDetailPage: React.FC = () => {
 
       {/* Session Packages */}
       <div style={cardStyle}>
-        <h3 style={{ margin: '0 0 1rem' }}>Session Packages</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h3 style={{ margin: 0 }}>Session Packages</h3>
+          <button
+            onClick={() => { setShowCreatePkg(v => !v); setCreatePkgErr(''); }}
+            style={btnSuccess}
+          >
+            {showCreatePkg ? 'Cancel' : '+ Add Package'}
+          </button>
+        </div>
+
+        {/* Create package form */}
+        {showCreatePkg && (
+          <div style={{ padding: '1rem', backgroundColor: '#f9f9f9', borderRadius: 4, marginBottom: '1rem' }}>
+            <h4 style={{ margin: '0 0 0.75rem' }}>New Session Package</h4>
+            {createPkgErr && (
+              <div data-testid="pkg-create-error" style={{ color: '#dc3545', marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+                {createPkgErr}
+              </div>
+            )}
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>Package Name *</label>
+              <input
+                data-testid="pkg-name-input"
+                value={createPkgForm.package_name}
+                onChange={e => setCreatePkgForm(f => ({ ...f, package_name: e.target.value }))}
+                style={inputStyle}
+                placeholder="e.g. 10-Session Physio Pack"
+              />
+            </div>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>Total Sessions *</label>
+              <input
+                data-testid="pkg-sessions-input"
+                type="number"
+                min="1"
+                step="1"
+                value={createPkgForm.total_sessions}
+                onChange={e => setCreatePkgForm(f => ({ ...f, total_sessions: e.target.value }))}
+                style={inputStyle}
+                placeholder="e.g. 10"
+              />
+            </div>
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>Expires At *</label>
+              <input
+                data-testid="pkg-expires-input"
+                type="date"
+                value={createPkgForm.expires_at}
+                onChange={e => setCreatePkgForm(f => ({ ...f, expires_at: e.target.value }))}
+                style={inputStyle}
+              />
+            </div>
+            <button
+              data-testid="pkg-create-submit"
+              onClick={handleCreatePackage}
+              disabled={createPkgSubmitting}
+              style={createPkgSubmitting ? btnDisabled : btnPrimary}
+            >
+              {createPkgSubmitting ? 'Creating...' : 'Create Package'}
+            </button>
+          </div>
+        )}
+
         {packages.length === 0 ? (
           <div style={{ color: '#999', textAlign: 'center', padding: '1rem' }}>No session packages</div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '0.75rem' }}>
             {packages.map(pkg => {
               const pkgExpired = new Date(pkg.expires_at) < new Date();
+              const pkgDepleted = pkg.remaining_sessions <= 0;
+              const pkgState: 'active' | 'expired' | 'depleted' = pkgExpired ? 'expired' : pkgDepleted ? 'depleted' : 'active';
+              const pkgStateColors: Record<string, { bg: string; color: string }> = {
+                active:   { bg: '#d4edda', color: '#155724' },
+                expired:  { bg: '#f8d7da', color: '#721c24' },
+                depleted: { bg: '#e2e3e5', color: '#383d41' },
+              };
+              const sc2 = pkgStateColors[pkgState];
               return (
-                <div key={pkg.id} style={{ padding: '0.75rem', border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: pkgExpired ? '#fff5f5' : '#fff' }}>
-                  <div style={{ fontWeight: 600 }}>{pkg.package_name}</div>
+                <div key={pkg.id} style={{ padding: '0.75rem', border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: pkgState !== 'active' ? '#fafafa' : '#fff' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ fontWeight: 600 }}>{pkg.package_name}</div>
+                    <span style={{ padding: '0.1rem 0.5rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600, backgroundColor: sc2.bg, color: sc2.color }}>
+                      {pkgState}
+                    </span>
+                  </div>
                   <div style={{ fontSize: '0.85rem', color: '#666', marginTop: 4 }}>
                     {pkg.remaining_sessions}/{pkg.total_sessions} sessions remaining
                   </div>

@@ -312,11 +312,26 @@ func (h *ChargeHandler) ImportRateTableCSV(c echo.Context) error {
 	if !validTypes[rtType] {
 		rtType = "distance"
 	}
+
+	// effective_date is required (DATE NOT NULL in schema). Accept from form field;
+	// default to today if omitted so the insert never writes a zero date.
+	effectiveDateStr := c.FormValue("effective_date")
+	if effectiveDateStr == "" {
+		effectiveDateStr = time.Now().Format("2006-01-02")
+	} else if _, parseErr := time.Parse("2006-01-02", effectiveDateStr); parseErr != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Invalid effective_date",
+			Code:    http.StatusBadRequest,
+			Details: "effective_date must be in YYYY-MM-DD format",
+		})
+	}
+
 	rt := &models.RateTable{
-		ID:    uuid.New().String(),
-		Name:  strings.TrimSuffix(file.Filename, ".csv"),
-		Type:  rtType,
-		Tiers: tiersJSON,
+		ID:            uuid.New().String(),
+		Name:          strings.TrimSuffix(file.Filename, ".csv"),
+		Type:          rtType,
+		Tiers:         tiersJSON,
+		EffectiveDate: effectiveDateStr,
 	}
 
 	if err := h.repo.CreateRateTable(rt); err != nil {

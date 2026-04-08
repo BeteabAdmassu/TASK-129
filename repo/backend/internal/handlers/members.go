@@ -316,7 +316,21 @@ func (h *MemberHandler) GetMember(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, member)
+	// Include session packages in the response so the frontend doesn't need a
+	// separate round-trip on the detail page.
+	packages, pkgErr := h.repo.GetSessionPackages(id)
+	if pkgErr != nil {
+		logrus.WithError(pkgErr).Warn("Failed to load session packages for member detail")
+		packages = []models.SessionPackage{}
+	}
+	if packages == nil {
+		packages = []models.SessionPackage{}
+	}
+
+	return c.JSON(http.StatusOK, struct {
+		*models.Member
+		Packages []models.SessionPackage `json:"packages"`
+	}{member, packages})
 }
 
 // RevealSensitiveFields returns the decrypted sensitive fields (verification_status,
@@ -1150,6 +1164,152 @@ func (h *MemberHandler) ListTransactions(c echo.Context) error {
 		Page:     page,
 		PageSize: pageSize,
 	})
+}
+
+// ListSessionPackages returns all session packages for a member.
+func (h *MemberHandler) ListSessionPackages(c echo.Context) error {
+	memberID := c.Param("id")
+	if memberID == "" {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "Member ID is required",
+			Code:  http.StatusBadRequest,
+		})
+	}
+
+	member, err := h.repo.GetMember(memberID)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to get member for packages")
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to retrieve member",
+			Code:  http.StatusInternalServerError,
+		})
+	}
+	if member == nil {
+		return c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "Member not found",
+			Code:    http.StatusNotFound,
+			Details: "No member found with the given ID",
+		})
+	}
+
+	packages, err := h.repo.GetSessionPackages(memberID)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to list session packages")
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to retrieve session packages",
+			Code:  http.StatusInternalServerError,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{"data": packages})
+}
+
+// parseSessionExpiresAt accepts either a YYYY-MM-DD date string (interpreted as
+// UTC midnight) or a full RFC3339 datetime string and returns a time.Time.
+// This allows the frontend to send the natural output of <input type="date">
+// without requiring a client-side RFC3339 conversion.
+func parseSessionExpiresAt(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC), nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("expires_at must be YYYY-MM-DD or RFC3339 (e.g. 2026-12-31 or 2026-12-31T00:00:00Z)")
+}
+
+// CreateSessionPackageHandler creates a new session package for a member.
+func (h *MemberHandler) CreateSessionPackageHandler(c echo.Context) error {
+	memberID := c.Param("id")
+	if memberID == "" {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "Member ID is required",
+			Code:  http.StatusBadRequest,
+		})
+	}
+
+	member, err := h.repo.GetMember(memberID)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to get member for package creation")
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to retrieve member",
+			Code:  http.StatusInternalServerError,
+		})
+	}
+	if member == nil {
+		return c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error:   "Member not found",
+			Code:    http.StatusNotFound,
+			Details: "No member found with the given ID",
+		})
+	}
+
+	var req struct {
+		PackageName   string `json:"package_name"`
+		TotalSessions int    `json:"total_sessions"`
+		// ExpiresAt accepts YYYY-MM-DD (from <input type="date">) or RFC3339.
+		ExpiresAt string `json:"expires_at"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: "Invalid request body",
+			Code:  http.StatusBadRequest,
+		})
+	}
+	if req.PackageName == "" {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Validation failed",
+			Code:    http.StatusBadRequest,
+			Details: "package_name is required",
+		})
+	}
+	if req.TotalSessions <= 0 {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Validation failed",
+			Code:    http.StatusBadRequest,
+			Details: "total_sessions must be greater than 0",
+		})
+	}
+	if req.ExpiresAt == "" {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Validation failed",
+			Code:    http.StatusBadRequest,
+			Details: "expires_at is required",
+		})
+	}
+	// Parse expires_at: accept YYYY-MM-DD (UTC midnight) or full RFC3339.
+	expiresAt, parseErr := parseSessionExpiresAt(req.ExpiresAt)
+	if parseErr != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Validation failed",
+			Code:    http.StatusBadRequest,
+			Details: parseErr.Error(),
+		})
+	}
+
+	pkg := &models.SessionPackage{
+		MemberID:          memberID,
+		PackageName:       req.PackageName,
+		TotalSessions:     req.TotalSessions,
+		RemainingSessions: req.TotalSessions,
+		ExpiresAt:         expiresAt,
+	}
+	if err := h.repo.CreateSessionPackage(pkg); err != nil {
+		logrus.WithError(err).Error("Failed to create session package")
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to create session package",
+			Code:  http.StatusInternalServerError,
+		})
+	}
+
+	userID := middleware.GetUserID(c)
+	logrus.WithFields(logrus.Fields{
+		"user_id":      userID,
+		"member_id":    memberID,
+		"package_name": pkg.PackageName,
+	}).Info("Session package created")
+
+	return c.JSON(http.StatusCreated, pkg)
 }
 
 // ListTiers returns all membership tiers.

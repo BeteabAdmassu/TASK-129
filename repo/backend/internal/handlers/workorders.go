@@ -239,18 +239,21 @@ func (h *WorkOrderHandler) CreateWorkOrder(c echo.Context) error {
 }
 
 // canViewWorkOrder is a pure authorization predicate extracted for testability.
-// Returns true if the given user may read the work order.
+// Policy must match list-level scoping:
+//   - system_admin: unrestricted
+//   - maintenance_tech: only work orders assigned to them
+//   - all other roles: only work orders they submitted
+//
+// This prevents a maintenance_tech from bypassing list-scope by hitting the
+// detail endpoint directly with an arbitrary ID.
 func canViewWorkOrder(userID, role, submittedBy string, assignedTo *string) bool {
-	if role == "system_admin" || role == "maintenance_tech" {
+	if role == "system_admin" {
 		return true
 	}
-	if submittedBy == userID {
-		return true
+	if role == "maintenance_tech" {
+		return assignedTo != nil && *assignedTo == userID
 	}
-	if assignedTo != nil && *assignedTo == userID {
-		return true
-	}
-	return false
+	return submittedBy == userID
 }
 
 // GetWorkOrder returns a single work order by ID.

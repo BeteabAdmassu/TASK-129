@@ -33,9 +33,24 @@ func TestCanViewWorkOrder_SystemAdminCanView(t *testing.T) {
 	}
 }
 
-func TestCanViewWorkOrder_MaintenanceTechCanView(t *testing.T) {
-	if !canViewWorkOrder("tech-user", "maintenance_tech", "someone-else", nil) {
-		t.Error("maintenance_tech should be able to view any work order")
+// H-04 fix: maintenance_tech is now assignment-bound (consistent with list scope).
+func TestCanViewWorkOrder_MaintenanceTech_AssignedToSelf_CanView(t *testing.T) {
+	assignee := "tech-user"
+	if !canViewWorkOrder("tech-user", "maintenance_tech", "someone-else", &assignee) {
+		t.Error("maintenance_tech assigned to the WO should be able to view it")
+	}
+}
+
+func TestCanViewWorkOrder_MaintenanceTech_NotAssigned_IsDenied(t *testing.T) {
+	if canViewWorkOrder("tech-user", "maintenance_tech", "someone-else", nil) {
+		t.Error("maintenance_tech not assigned to the WO must be denied (H-04 fix)")
+	}
+}
+
+func TestCanViewWorkOrder_MaintenanceTech_DifferentAssignee_IsDenied(t *testing.T) {
+	otherTech := "other-tech"
+	if canViewWorkOrder("tech-user", "maintenance_tech", "someone-else", &otherTech) {
+		t.Error("maintenance_tech must be denied when a different tech is assigned (H-04 fix)")
 	}
 }
 
