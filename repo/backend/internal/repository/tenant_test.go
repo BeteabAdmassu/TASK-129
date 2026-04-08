@@ -414,6 +414,43 @@ func TestCreateKnowledgePoint_TenantPersisted(t *testing.T) {
 	assertArg(t, cap, "CreateKnowledgePoint", testTenantID)
 }
 
+// ─── Tests: financial/membership methods fixed in B-001 ──────────────────────
+
+func TestListMemberTransactions_TenantScoped(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.ListMemberTransactions("member-1", 1, 20)
+	assertSQL(t, cap, "ListMemberTransactions", "tenant_id")
+	assertArg(t, cap, "ListMemberTransactions", testTenantID)
+}
+
+func TestCreateMemberTransaction_TenantPersisted(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.CreateMemberTransaction(&models.MemberTransaction{MemberID: "member-1", Type: "top_up", Amount: 10.0})
+	assertSQL(t, cap, "CreateMemberTransaction", "tenant_id")
+	assertArg(t, cap, "CreateMemberTransaction", testTenantID)
+}
+
+func TestCreateRateTable_TenantPersisted(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.CreateRateTable(&models.RateTable{Name: "Standard", Type: "distance"})
+	assertSQL(t, cap, "CreateRateTable", "tenant_id")
+	assertArg(t, cap, "CreateRateTable", testTenantID)
+}
+
+func TestListStatements_TenantScoped(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.ListStatements(1, 20)
+	assertSQL(t, cap, "ListStatements", "tenant_id")
+	assertArg(t, cap, "ListStatements", testTenantID)
+}
+
+func TestCreateStatement_TenantPersisted(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.CreateStatement(&models.ChargeStatement{Status: "pending"})
+	assertSQL(t, cap, "CreateStatement", "tenant_id")
+	assertArg(t, cap, "CreateStatement", testTenantID)
+}
+
 // ─── Isolation invariant: different tenant IDs produce different bound args ───
 
 // TestTenantArgIsConfiguredValue fails if the repository passes a hardcoded

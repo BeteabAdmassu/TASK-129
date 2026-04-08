@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import type { ErrorResponse } from '../types';
+import type { ErrorResponse, WorkOrderDetailResponse } from '../types';
 
 // In Electron (desktop) mode the preload script injects __ELECTRON_API_BASE__
 // with an absolute URL so API calls work from file:// origins.
@@ -114,7 +114,7 @@ export const learningAPI = {
 export const workOrdersAPI = {
   list: (params?: { status?: string; page?: number; page_size?: number }) =>
     api.get('/work-orders', { params }),
-  get: (id: string) => api.get(`/work-orders/${id}`),
+  get: (id: string) => api.get<WorkOrderDetailResponse>(`/work-orders/${id}`),
   create: (data: Record<string, unknown>) => api.post('/work-orders', data),
   update: (id: string, data: Record<string, unknown>) => api.put(`/work-orders/${id}`, data),
   close: (id: string, data: { parts_cost: number; labor_cost: number }) =>

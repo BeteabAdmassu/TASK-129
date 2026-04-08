@@ -1091,9 +1091,9 @@ func (r *Repository) ListMemberTransactions(memberID string, page, pageSize int)
 		`SELECT id, member_id, type, amount, description, performed_by, created_at,
 		        COUNT(*) OVER() AS total
 		 FROM member_transactions
-		 WHERE member_id = $1
+		 WHERE member_id = $1 AND tenant_id = $4
 		 ORDER BY created_at DESC
-		 LIMIT $2 OFFSET $3`, memberID, pageSize, offset,
+		 LIMIT $2 OFFSET $3`, memberID, pageSize, offset, r.tenantID,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list member transactions: %w", err)
@@ -1119,9 +1119,9 @@ func (r *Repository) CreateMemberTransaction(tx *models.MemberTransaction) error
 	}
 	tx.CreatedAt = time.Now()
 	_, err := r.DB.Exec(
-		`INSERT INTO member_transactions (id, member_id, type, amount, description, performed_by, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		tx.ID, tx.MemberID, tx.Type, tx.Amount, tx.Description, tx.PerformedBy, tx.CreatedAt,
+		`INSERT INTO member_transactions (id, member_id, type, amount, description, performed_by, created_at, tenant_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		tx.ID, tx.MemberID, tx.Type, tx.Amount, tx.Description, tx.PerformedBy, tx.CreatedAt, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("create member transaction: %w", err)
@@ -1237,9 +1237,9 @@ func (r *Repository) CreateRateTable(rt *models.RateTable) error {
 		rt.ID = uuid.New().String()
 	}
 	_, err := r.DB.Exec(
-		`INSERT INTO rate_tables (id, name, type, tiers, fuel_surcharge_pct, taxable, effective_date)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		rt.ID, rt.Name, rt.Type, rt.Tiers, rt.FuelSurchargePct, rt.Taxable, rt.EffectiveDate,
+		`INSERT INTO rate_tables (id, name, type, tiers, fuel_surcharge_pct, taxable, effective_date, tenant_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		rt.ID, rt.Name, rt.Type, rt.Tiers, rt.FuelSurchargePct, rt.Taxable, rt.EffectiveDate, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("create rate table: %w", err)
@@ -1267,8 +1267,9 @@ func (r *Repository) ListStatements(page, pageSize int) ([]models.ChargeStatemen
 		        approved_by_1, approved_by_2, reconciled_at, variance_notes, paid_at, created_at,
 		        COUNT(*) OVER() AS total
 		 FROM charge_statements
+		 WHERE tenant_id = $3
 		 ORDER BY created_at DESC
-		 LIMIT $1 OFFSET $2`, pageSize, offset,
+		 LIMIT $1 OFFSET $2`, pageSize, offset, r.tenantID,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list statements: %w", err)
@@ -1314,10 +1315,10 @@ func (r *Repository) CreateStatement(stmt *models.ChargeStatement) error {
 	stmt.CreatedAt = time.Now()
 	_, err := r.DB.Exec(
 		`INSERT INTO charge_statements (id, period_start, period_end, total_amount, expected_total, status,
-		        approved_by_1, approved_by_2, reconciled_at, variance_notes, paid_at, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		        approved_by_1, approved_by_2, reconciled_at, variance_notes, paid_at, created_at, tenant_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		stmt.ID, stmt.PeriodStart, stmt.PeriodEnd, stmt.TotalAmount, stmt.ExpectedTotal, stmt.Status,
-		stmt.ApprovedBy1, stmt.ApprovedBy2, stmt.ReconciledAt, stmt.VarianceNotes, stmt.PaidAt, stmt.CreatedAt,
+		stmt.ApprovedBy1, stmt.ApprovedBy2, stmt.ReconciledAt, stmt.VarianceNotes, stmt.PaidAt, stmt.CreatedAt, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("create statement: %w", err)

@@ -123,6 +123,23 @@ export interface WorkOrder {
   created_at: string;
 }
 
+export interface ManagedFile {
+  id: string;
+  sha256: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  storage_path: string;
+  uploaded_by?: string;
+  created_at: string;
+}
+
+/** Response envelope returned by GET /work-orders/:id */
+export interface WorkOrderDetailResponse {
+  work_order: WorkOrder;
+  photos: ManagedFile[];
+}
+
 export interface Member {
   id: string;
   name: string;

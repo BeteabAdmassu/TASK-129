@@ -75,6 +75,7 @@ const WorkOrdersPage: React.FC = () => {
         priority: createForm.priority,
         description: createForm.description.trim(),
         location: createForm.location.trim(),
+        photo_ids: [],
       });
       setCreateSuccess('Work order created successfully');
       setShowCreate(false);

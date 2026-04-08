@@ -119,8 +119,8 @@ Response includes:
 | Method | Path | Auth | Description | Request Body | Response | Errors |
 |--------|------|------|-------------|-------------|----------|--------|
 | GET | /work-orders | Any | List (role-filtered) | query: `?status=&priority=&assigned_to=` | `{data[], pagination}` | — |
-| POST | /work-orders | Any | Submit request | `{description, location, priority, trade, photos[]}` | `{work_order}` | 400 |
-| GET | /work-orders/:id | Any | Detail | — | `{work_order, photos[]}` | 404 |
+| POST | /work-orders | Any | Submit request | `{description, location, priority, trade, photo_ids[]}` | `WorkOrder` | 400 |
+| GET | /work-orders/:id | Any | Detail | — | `{work_order, photos[]}` | 403, 404 |
 | PUT | /work-orders/:id | Maintenance | Update | partial fields | `{work_order}` | 400, 404 |
 | POST | /work-orders/:id/close | Maintenance | Close | `{parts_cost, labor_cost, notes}` | `{work_order}` | 400 |
 | POST | /work-orders/:id/rate | Any | Rate | `{rating}` (1-5) | `{work_order}` | 400 |

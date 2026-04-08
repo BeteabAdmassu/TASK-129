@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { workOrdersAPI } from '../../services/api';
 import { useAuth } from '../../hooks/useAuth';
-import type { WorkOrder } from '../../types';
+import type { WorkOrder, ManagedFile } from '../../types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorMessage from '../common/ErrorMessage';
 
@@ -38,6 +38,7 @@ const WorkOrderDetailPage: React.FC = () => {
   const { user } = useAuth();
 
   const [order, setOrder] = useState<WorkOrder | null>(null);
+  const [photos, setPhotos] = useState<ManagedFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
@@ -58,8 +59,13 @@ const WorkOrderDetailPage: React.FC = () => {
     setError('');
     try {
       const r = await workOrdersAPI.get(id);
-      setOrder(r.data);
-      if (r.data.rating) { setRating(r.data.rating); setRatingSubmitted(true); }
+      const payload = r.data;
+      // Support new envelope {work_order, photos} and legacy plain WorkOrder.
+      const wo: WorkOrder = (payload as { work_order?: WorkOrder }).work_order ?? (payload as unknown as WorkOrder);
+      const photoList: ManagedFile[] = (payload as { photos?: ManagedFile[] }).photos ?? [];
+      setOrder(wo);
+      setPhotos(photoList);
+      if (wo.rating) { setRating(wo.rating); setRatingSubmitted(true); }
     } catch (e: any) {
       setError(e.response?.data?.error || 'Failed to load work order');
     } finally {

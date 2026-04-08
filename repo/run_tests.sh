@@ -403,9 +403,9 @@ else
     fail "Create work order" "$CREATE_WO"
 fi
 
-# Get work order
+# Get work order — response is now {work_order: {...}, photos: []}
 GET_WO=$(curl -sf "${API_URL}/work-orders/${WO_ID}" -H "Authorization: Bearer $FD_TOKEN")
-if echo "$GET_WO" | jq -e '.priority == "high"' > /dev/null 2>&1; then
+if echo "$GET_WO" | jq -e '.work_order.priority == "high" and (.photos | type) == "array"' > /dev/null 2>&1; then
     pass "Get work order detail"
 else
     fail "Get work order detail" "$GET_WO"

@@ -177,7 +177,7 @@ func (h *FileHandler) Download(c echo.Context) error {
 	}
 
 	managedFile, err := h.repo.GetFileByID(id)
-	if err != nil {
+	if err != nil || managedFile == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "File not found",
 			Code:    http.StatusNotFound,

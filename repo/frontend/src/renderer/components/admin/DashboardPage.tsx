@@ -70,14 +70,17 @@ const DashboardPage: React.FC = () => {
       // Everyone gets work orders
       promises.push(
         workOrdersAPI.list({ page: 1, page_size: 100 }).then((res) => {
-          result.workOrders = res.data.data || res.data || [];
+          const payload = res.data;
+          const arr = payload?.data ?? payload;
+          result.workOrders = Array.isArray(arr) ? arr : [];
         }).catch(() => { /* non-critical */ })
       );
 
       if (user?.role === 'inventory_pharmacist') {
         promises.push(
           skusAPI.getLowStock().then((res) => {
-            result.lowStockSkus = res.data.data || res.data || [];
+            const arr = res.data?.data ?? res.data;
+            result.lowStockSkus = Array.isArray(arr) ? arr : [];
           }).catch(() => {})
         );
       }
@@ -85,7 +88,8 @@ const DashboardPage: React.FC = () => {
       if (user?.role === 'front_desk') {
         promises.push(
           membersAPI.list({ page: 1, page_size: 500 }).then((res) => {
-            result.members = res.data.data || res.data || [];
+            const arr = res.data?.data ?? res.data;
+            result.members = Array.isArray(arr) ? arr : [];
           }).catch(() => {})
         );
       }
@@ -93,7 +97,8 @@ const DashboardPage: React.FC = () => {
       if (user?.role === 'system_admin') {
         promises.push(
           usersAPI.list().then((res) => {
-            result.users = res.data.data || res.data || [];
+            const arr = res.data?.data ?? res.data;
+            result.users = Array.isArray(arr) ? arr : [];
           }).catch(() => {})
         );
         promises.push(

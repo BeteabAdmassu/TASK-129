@@ -8,8 +8,10 @@ package handlers
 // predicate level — covering the object-authorization paths identified in F-007.
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -23,6 +25,11 @@ import (
 // stubWorkOrderStore is a minimal in-memory store for testing WorkOrderHandler.
 type stubWorkOrderStore struct {
 	wo *models.WorkOrder
+	// linkedPhotos records which (workOrderID, fileID) pairs were passed to
+	// LinkPhotoToWorkOrder, enabling assertions in create-with-photos tests.
+	linkedPhotos [][2]string
+	// photosToReturn is the photo list returned by GetWorkOrderPhotos.
+	photosToReturn []models.ManagedFile
 }
 
 func (s *stubWorkOrderStore) GetWorkOrderByID(_ string) (*models.WorkOrder, error) {
@@ -39,6 +46,18 @@ func (s *stubWorkOrderStore) GetWorkOrderAnalytics() (map[string]interface{}, er
 }
 func (s *stubWorkOrderStore) CreateAuditLog(_ *models.AuditLogEntry) error { return nil }
 
+func (s *stubWorkOrderStore) LinkPhotoToWorkOrder(workOrderID, fileID string) (*models.WorkOrderPhoto, error) {
+	s.linkedPhotos = append(s.linkedPhotos, [2]string{workOrderID, fileID})
+	return &models.WorkOrderPhoto{WorkOrderID: workOrderID, FileID: fileID}, nil
+}
+
+func (s *stubWorkOrderStore) GetWorkOrderPhotos(_ string) ([]models.ManagedFile, error) {
+	if s.photosToReturn != nil {
+		return s.photosToReturn, nil
+	}
+	return []models.ManagedFile{}, nil
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 // echoCtx builds an echo.Context with the given method/path and sets
@@ -46,6 +65,19 @@ func (s *stubWorkOrderStore) CreateAuditLog(_ *models.AuditLogEntry) error { ret
 func echoCtx(method, path, userID, role string) (echo.Context, *httptest.ResponseRecorder) {
 	e := echo.New()
 	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set("user_id", userID)
+	c.Set("user_role", role)
+	return c, rec
+}
+
+// echoCtxJSON builds an echo.Context with a JSON request body.
+func echoCtxJSON(method, path, userID, role string, body interface{}) (echo.Context, *httptest.ResponseRecorder) {
+	e := echo.New()
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(method, path, strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.Set("user_id", userID)
@@ -174,6 +206,168 @@ func TestGetWorkOrderAPI_NotFound_Gets404(t *testing.T) {
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("missing work order should get 404; got %d", rec.Code)
+	}
+}
+
+// ─── GetWorkOrder response shape tests ────────────────────────────────────────
+
+// TestGetWorkOrderAPI_ResponseContainsWorkOrderAndPhotos verifies that a
+// successful GET /work-orders/:id response includes both "work_order" and
+// "photos" keys, matching the documented API contract.
+func TestGetWorkOrderAPI_ResponseContainsWorkOrderAndPhotos(t *testing.T) {
+	submitterID := "uid-submitter"
+	fileID := "file-abc"
+	wo := &models.WorkOrder{ID: "wo-010", SubmittedBy: submitterID}
+	photos := []models.ManagedFile{{ID: fileID, OriginalName: "damage.jpg"}}
+
+	store := &stubWorkOrderStore{wo: wo, photosToReturn: photos}
+	h := &WorkOrderHandler{repo: store}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders/wo-010", submitterID, "front_desk")
+	c.SetParamNames("id")
+	c.SetParamValues("wo-010")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200; got %d — body: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if _, ok := resp["work_order"]; !ok {
+		t.Error(`response missing "work_order" key`)
+	}
+	if _, ok := resp["photos"]; !ok {
+		t.Error(`response missing "photos" key`)
+	}
+}
+
+// TestGetWorkOrderAPI_PhotosEmptyArrayWhenNone verifies that the "photos" key
+// is present and is an empty array when no photos are linked.
+func TestGetWorkOrderAPI_PhotosEmptyArrayWhenNone(t *testing.T) {
+	submitterID := "uid-submitter"
+	wo := &models.WorkOrder{ID: "wo-011", SubmittedBy: submitterID}
+
+	h := &WorkOrderHandler{repo: &stubWorkOrderStore{wo: wo}}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders/wo-011", submitterID, "front_desk")
+	c.SetParamNames("id")
+	c.SetParamValues("wo-011")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	photosVal, ok := resp["photos"]
+	if !ok {
+		t.Fatal(`response missing "photos" key`)
+	}
+	photos, ok := photosVal.([]interface{})
+	if !ok {
+		t.Fatalf(`"photos" is not an array; got %T`, photosVal)
+	}
+	if len(photos) != 0 {
+		t.Errorf("expected empty photos array; got %d items", len(photos))
+	}
+}
+
+// TestGetWorkOrderAPI_UnauthorizedUserCannotSeePhotos verifies that an
+// unauthorized user is still turned away with 403 and does NOT receive photos,
+// even if the work order has linked photos.
+func TestGetWorkOrderAPI_UnauthorizedUserCannotSeePhotos(t *testing.T) {
+	wo := &models.WorkOrder{ID: "wo-012", SubmittedBy: "uid-owner"}
+	photos := []models.ManagedFile{{ID: "file-secret", OriginalName: "confidential.jpg"}}
+
+	store := &stubWorkOrderStore{wo: wo, photosToReturn: photos}
+	h := &WorkOrderHandler{repo: store}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders/wo-012", "uid-stranger", "inventory_pharmacist")
+	c.SetParamNames("id")
+	c.SetParamValues("wo-012")
+
+	if err := h.GetWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("unauthorized user should get 403; got %d", rec.Code)
+	}
+	// The response body must not contain the photo data.
+	body := rec.Body.String()
+	if strings.Contains(body, "file-secret") {
+		t.Error("403 response body must not contain photo ID of unauthorized work order")
+	}
+}
+
+// ─── CreateWorkOrder photo-linking tests ──────────────────────────────────────
+
+// TestCreateWorkOrderAPI_LinksProvidedPhotoIDs verifies that when photo_ids
+// are included in a create request, the handler calls LinkPhotoToWorkOrder for
+// each ID after the work order is persisted.
+func TestCreateWorkOrderAPI_LinksProvidedPhotoIDs(t *testing.T) {
+	store := &stubWorkOrderStore{}
+	h := &WorkOrderHandler{repo: store}
+
+	payload := map[string]interface{}{
+		"trade":       "electrical",
+		"priority":    "high",
+		"description": "Broken outlet in exam room",
+		"location":    "Building A, Room 101",
+		"photo_ids":   []string{"file-001", "file-002"},
+	}
+
+	c, rec := echoCtxJSON(http.MethodPost, "/work-orders", "uid-user", "front_desk", payload)
+
+	if err := h.CreateWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201; got %d — body: %s", rec.Code, rec.Body.String())
+	}
+	if len(store.linkedPhotos) != 2 {
+		t.Errorf("expected 2 photo links; got %d", len(store.linkedPhotos))
+	}
+	seen := map[string]bool{}
+	for _, pair := range store.linkedPhotos {
+		seen[pair[1]] = true
+	}
+	for _, id := range []string{"file-001", "file-002"} {
+		if !seen[id] {
+			t.Errorf("photo %q was not linked", id)
+		}
+	}
+}
+
+// TestCreateWorkOrderAPI_NoPhotosIsValid verifies that omitting photo_ids
+// creates the work order successfully with no link calls.
+func TestCreateWorkOrderAPI_NoPhotosIsValid(t *testing.T) {
+	store := &stubWorkOrderStore{}
+	h := &WorkOrderHandler{repo: store}
+
+	payload := map[string]interface{}{
+		"trade":       "plumbing",
+		"priority":    "normal",
+		"description": "Leaking sink",
+		"location":    "Building B, Room 202",
+	}
+
+	c, rec := echoCtxJSON(http.MethodPost, "/work-orders", "uid-user", "front_desk", payload)
+
+	if err := h.CreateWorkOrder(c); err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201; got %d — body: %s", rec.Code, rec.Body.String())
+	}
+	if len(store.linkedPhotos) != 0 {
+		t.Errorf("expected no photo links; got %d", len(store.linkedPhotos))
 	}
 }
 

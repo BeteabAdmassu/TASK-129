@@ -186,10 +186,26 @@ func (h *WorkOrderHandler) CreateWorkOrder(c echo.Context) error {
 		})
 	}
 
+	// Link any photos provided at creation time.
+	// Invalid/unknown photo IDs are skipped with a warning so the work order
+	// is not lost; callers should pre-validate file IDs via GET /files/:id.
+	linkedPhotoIDs := make([]string, 0, len(req.PhotoIDs))
+	for _, photoID := range req.PhotoIDs {
+		if _, err := h.repo.LinkPhotoToWorkOrder(wo.ID, photoID); err != nil {
+			logrus.WithFields(logrus.Fields{
+				"wo_id":    wo.ID,
+				"photo_id": photoID,
+			}).WithError(err).Warn("Skipping photo link during work order creation")
+			continue
+		}
+		linkedPhotoIDs = append(linkedPhotoIDs, photoID)
+	}
+
 	details, _ := json.Marshal(map[string]interface{}{
-		"trade":    req.Trade,
-		"priority": req.Priority,
-		"location": req.Location,
+		"trade":           req.Trade,
+		"priority":        req.Priority,
+		"location":        req.Location,
+		"linked_photo_ids": linkedPhotoIDs,
 	})
 	h.repo.CreateAuditLog(&models.AuditLogEntry{
 		UserID:     userID,
@@ -200,9 +216,10 @@ func (h *WorkOrderHandler) CreateWorkOrder(c echo.Context) error {
 	})
 
 	logrus.WithFields(logrus.Fields{
-		"user_id":  userID,
-		"wo_id":    wo.ID,
-		"priority": wo.Priority,
+		"user_id":      userID,
+		"wo_id":        wo.ID,
+		"priority":     wo.Priority,
+		"photos_linked": len(linkedPhotoIDs),
 	}).Info("Work order created")
 
 	return c.JSON(http.StatusCreated, wo)
@@ -253,7 +270,22 @@ func (h *WorkOrderHandler) GetWorkOrder(c echo.Context) error {
 		})
 	}
 
-	return c.JSON(http.StatusOK, wo)
+	photos, err := h.repo.GetWorkOrderPhotos(id)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to get work order photos")
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to retrieve work order photos",
+			Code:  http.StatusInternalServerError,
+		})
+	}
+	if photos == nil {
+		photos = []models.ManagedFile{}
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"work_order": wo,
+		"photos":     photos,
+	})
 }
 
 // UpdateWorkOrder updates a work order. Only maintenance role users can update.
@@ -513,6 +545,15 @@ func (h *WorkOrderHandler) LinkPhoto(c echo.Context) error {
 		})
 	}
 
+	userID := middleware.GetUserID(c)
+	role := middleware.GetUserRole(c)
+	if !canViewWorkOrder(userID, role, wo.SubmittedBy, wo.AssignedTo) {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error: "Access denied",
+			Code:  http.StatusForbidden,
+		})
+	}
+
 	var body struct {
 		FileID string `json:"file_id"`
 	}
@@ -533,7 +574,6 @@ func (h *WorkOrderHandler) LinkPhoto(c echo.Context) error {
 		})
 	}
 
-	userID := middleware.GetUserID(c)
 	details, _ := json.Marshal(map[string]string{"wo_id": woID, "file_id": body.FileID})
 	h.repo.CreateAuditLog(&models.AuditLogEntry{
 		UserID: userID, Action: "link_photo", EntityType: "work_order", EntityID: woID, Details: details,
@@ -550,6 +590,23 @@ func (h *WorkOrderHandler) GetPhotos(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error: "Work order ID is required",
 			Code:  http.StatusBadRequest,
+		})
+	}
+
+	wo, err := h.repo.GetWorkOrderByID(woID)
+	if err != nil || wo == nil {
+		return c.JSON(http.StatusNotFound, models.ErrorResponse{
+			Error: "Work order not found",
+			Code:  http.StatusNotFound,
+		})
+	}
+
+	userID := middleware.GetUserID(c)
+	role := middleware.GetUserRole(c)
+	if !canViewWorkOrder(userID, role, wo.SubmittedBy, wo.AssignedTo) {
+		return c.JSON(http.StatusForbidden, models.ErrorResponse{
+			Error: "Access denied",
+			Code:  http.StatusForbidden,
 		})
 	}
 
