@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { chargesAPI } from '../../services/api';
+import { useDraftAutoSave } from '../../hooks/useDraftAutoSave';
 import type { RateTable } from '../../types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorMessage from '../common/ErrorMessage';
@@ -57,6 +58,9 @@ const RateTablesPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Draft auto-save: persists the create-rate-table form every 30 s
+  const { clearDraft: clearRateDraft } = useDraftAutoSave('rate_table_create', null, form);
+
   // CSV import
   const csvInputRef = useRef<HTMLInputElement>(null);
   const [importLoading, setImportLoading] = useState(false);
@@ -97,6 +101,7 @@ const RateTablesPage: React.FC = () => {
         effective_date: form.effective_date,
       });
       setSuccessMsg('Rate table created successfully');
+      clearRateDraft();
       setShowCreate(false);
       setForm({ name: '', type: 'distance', tiers: '[{"min": 0, "max": 10, "rate": 5}]', fuel_surcharge_pct: '0', taxable: false, effective_date: '' });
       fetchRateTables();

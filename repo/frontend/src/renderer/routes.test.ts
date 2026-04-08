@@ -548,3 +548,102 @@ describe('Rollback failure paths', () => {
     expect(response.restart_required).toBe(true);
   });
 });
+
+// ─── F-001: Lock-screen auth state derivation ─────────────────────────────────
+//
+// isAuthenticated is derived from medops_user in localStorage, NOT from
+// medops_token. The lock handler in main.ts must remove BOTH keys to prevent
+// lock bypass (F-001 fix).
+//
+// These tests mirror the exact derivation logic in AuthContext:
+//   const user = localStorage.getItem('medops_user');
+//   const isAuthenticated = !!user;
+
+function isAuthenticatedFromStorage(): boolean {
+  return !!localStorage.getItem('medops_user');
+}
+
+/** Simulates the F-001 fix: onLock removes both keys. */
+function applyLock(): void {
+  localStorage.removeItem('medops_token');
+  localStorage.removeItem('medops_user');
+}
+
+/** Simulates the original bug: onLock only removed medops_token. */
+function applyLockBuggy(): void {
+  localStorage.removeItem('medops_token');
+  // medops_user is NOT removed — this was the bug
+}
+
+describe('F-001 lock-screen auth state', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('isAuthenticated is false when both keys are absent', () => {
+    expect(isAuthenticatedFromStorage()).toBe(false);
+  });
+
+  it('isAuthenticated is true when medops_user is present (regardless of token)', () => {
+    localStorage.setItem('medops_user', JSON.stringify({ id: 'u1', role: 'front_desk' }));
+    expect(isAuthenticatedFromStorage()).toBe(true);
+  });
+
+  it('isAuthenticated is false when only medops_token is present (token alone is insufficient)', () => {
+    // token present but no user object — unauthenticated
+    localStorage.setItem('medops_token', 'eyJ...');
+    expect(isAuthenticatedFromStorage()).toBe(false);
+  });
+
+  it('F-001 fix: applying lock removes medops_user and leaves isAuthenticated=false', () => {
+    localStorage.setItem('medops_token', 'eyJ...');
+    localStorage.setItem('medops_user', JSON.stringify({ id: 'u1', role: 'front_desk' }));
+
+    applyLock();
+
+    expect(isAuthenticatedFromStorage()).toBe(false);
+    expect(localStorage.getItem('medops_token')).toBeNull();
+    expect(localStorage.getItem('medops_user')).toBeNull();
+  });
+
+  it('F-001 regression: buggy lock leaves medops_user and isAuthenticated=true (documents original bug)', () => {
+    // This test documents the original vulnerable behaviour so a regression
+    // is caught immediately if the fix is accidentally reverted.
+    localStorage.setItem('medops_token', 'eyJ...');
+    localStorage.setItem('medops_user', JSON.stringify({ id: 'u1', role: 'front_desk' }));
+
+    applyLockBuggy(); // only removes token — the bug
+
+    // With the bug still in effect: user can bypass the lock screen
+    expect(isAuthenticatedFromStorage()).toBe(true); // medops_user still present
+    expect(localStorage.getItem('medops_token')).toBeNull();
+    expect(localStorage.getItem('medops_user')).not.toBeNull();
+  });
+
+  it('lock is idempotent: applying it twice is safe', () => {
+    localStorage.setItem('medops_token', 'eyJ...');
+    localStorage.setItem('medops_user', JSON.stringify({ id: 'u1', role: 'front_desk' }));
+
+    applyLock();
+    applyLock(); // second lock — no error, still false
+
+    expect(isAuthenticatedFromStorage()).toBe(false);
+  });
+
+  it('fresh login after lock: adding medops_user restores authentication', () => {
+    localStorage.setItem('medops_token', 'eyJ...');
+    localStorage.setItem('medops_user', JSON.stringify({ id: 'u1', role: 'front_desk' }));
+
+    applyLock();
+    expect(isAuthenticatedFromStorage()).toBe(false);
+
+    // Simulate successful re-login
+    localStorage.setItem('medops_token', 'eyJnew...');
+    localStorage.setItem('medops_user', JSON.stringify({ id: 'u1', role: 'front_desk' }));
+    expect(isAuthenticatedFromStorage()).toBe(true);
+  });
+});

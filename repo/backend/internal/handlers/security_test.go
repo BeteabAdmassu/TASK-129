@@ -287,6 +287,47 @@ func TestAdjustTxType_OnlyReturnsInOrOut(t *testing.T) {
 	}
 }
 
+// ─── F-003: canDownloadFile secondary authorization (work-order linked) ───────
+//
+// F-003 added a secondary authorization path so that maintenance_tech (and
+// other non-privileged users) who are linked to a work order can download
+// photos attached to that work order — even when canDownloadFile returns false.
+//
+// These tests verify the PRIMARY predicate behaviour. The secondary check
+// (IsFileLinkedToUserWorkOrder) is a repository concern tested separately in
+// repository/tenant_test.go because it requires SQL query assertion.
+
+// TestCanDownloadFile_MaintenanceTech_NotUploader_Denied verifies that the
+// primary predicate alone denies a maintenance_tech who didn't upload the file.
+// The secondary WO-link check is what would ultimately grant them access —
+// this test documents that the primary check is deliberately strict.
+func TestCanDownloadFile_MaintenanceTech_NotUploader_Denied(t *testing.T) {
+	uploader := "uid-uploader"
+	// maintenance_tech calling with a DIFFERENT userID than the uploader
+	if canDownloadFile("uid-tech", "maintenance_tech", &uploader) {
+		t.Error("maintenance_tech who is NOT the uploader must NOT pass the primary canDownloadFile check; " +
+			"access should come via the secondary work-order linkage check in the handler")
+	}
+}
+
+// TestCanDownloadFile_MaintenanceTech_IsUploader_Allowed verifies that a
+// maintenance_tech who uploaded the file themselves does pass the primary check.
+func TestCanDownloadFile_MaintenanceTech_IsUploader_Allowed(t *testing.T) {
+	techID := "uid-tech"
+	if !canDownloadFile("uid-tech", "maintenance_tech", &techID) {
+		t.Error("maintenance_tech who uploaded the file should pass the primary canDownloadFile check")
+	}
+}
+
+// TestCanDownloadFile_FrontDesk_NotUploader_Denied verifies that a front_desk
+// user who is not the uploader is denied by the primary check.
+func TestCanDownloadFile_FrontDesk_NotUploader_Denied(t *testing.T) {
+	uploader := "uid-other"
+	if canDownloadFile("uid-fd", "front_desk", &uploader) {
+		t.Error("front_desk who is not the uploader should be denied")
+	}
+}
+
 // ─── Tenant isolation tests ───────────────────────────────────────────────────
 // Real tenant isolation tests (query-capturing driver) live in:
 //   repo/backend/internal/repository/tenant_test.go

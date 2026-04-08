@@ -1,6 +1,7 @@
 import React, { useState, FormEvent, useEffect } from 'react';
 import { usersAPI } from '../../services/api';
 import { useFetch } from '../../hooks/useFetch';
+import { useDraftAutoSave } from '../../hooks/useDraftAutoSave';
 import type { User } from '../../types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorMessage from '../common/ErrorMessage';
@@ -50,6 +51,11 @@ const UsersPage: React.FC = () => {
   const [createLoading, setCreateLoading] = useState(false);
   const [createSuccess, setCreateSuccess] = useState('');
 
+  // Draft auto-save: persists the create-user form every 30 s
+  // Note: password field is intentionally included so the form can be recovered,
+  // but draft storage is server-side (scoped to userID) — not localStorage.
+  const { clearDraft: clearUserDraft } = useDraftAutoSave('user_create', null, createForm);
+
   // Edit modal
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editRole, setEditRole] = useState('');
@@ -85,6 +91,7 @@ const UsersPage: React.FC = () => {
         role: createForm.role,
       });
       setCreateSuccess('User created successfully');
+      clearUserDraft();
       setCreateForm({ username: '', password: '', role: ROLES[0] });
       setCreateErrors({});
       refetch();

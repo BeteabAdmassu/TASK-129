@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { skusAPI, inventoryAPI } from '../../services/api';
 import { useFetch } from '../../hooks/useFetch';
 import { useAuth } from '../../hooks/useAuth';
+import { useDraftAutoSave } from '../../hooks/useDraftAutoSave';
 import type { SKU, InventoryBatch, PaginatedResponse } from '../../types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorMessage from '../common/ErrorMessage';
@@ -44,6 +45,9 @@ const SKUListPage: React.FC = () => {
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
   const [createLoading, setCreateLoading] = useState(false);
   const [createSuccess, setCreateSuccess] = useState('');
+
+  // Draft auto-save: persists the create form every 30 s so no data is lost on crash/navigation
+  const { clearDraft: clearSkuDraft } = useDraftAutoSave('sku_create', null, createForm);
 
   // Context menu
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; sku: SKU } | null>(null);
@@ -89,6 +93,7 @@ const SKUListPage: React.FC = () => {
         is_active: createForm.is_active,
       });
       setCreateSuccess('SKU created successfully');
+      clearSkuDraft();
       setCreateForm({ name: '', ndc: '', upc: '', description: '', unit_of_measure: 'each', low_stock_threshold: 10, storage_location: '', is_active: true });
       setCreateErrors({});
       refetch();

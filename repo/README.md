@@ -202,10 +202,10 @@ All API endpoints are served at `http://localhost:8080/api/v1/`.
 - `POST /system/rollback` — Roll back to the previous installed version: restores database from pre-update pg_dump snapshot **and** restores backend binary + frontend assets from artifact snapshot; writes a restart flag so Electron automatically stops/starts the backend subprocess; returns `version`, `status`, `artifacts_restored`, `restart_required`, `rolled_back_at`
 - `GET /system/config` — Get system configuration key-value pairs
 - `PUT /system/config` — Update a single config key (`{ key, value }`)
-- `POST /system/drafts/:formType` — Save a form draft checkpoint
-- `GET /system/drafts` — List all drafts for the authenticated user
-- `GET /system/drafts/:formType/:formId` — Get a specific draft
-- `DELETE /system/drafts/:formType/:formId` — Delete a specific draft
+- `PUT /drafts/:formType` — Save a form draft checkpoint (auto-saved every 30 s)
+- `GET /drafts` — List all drafts for the authenticated user
+- `GET /drafts/:formType/:formId` — Get a specific draft
+- `DELETE /drafts/:formType/:formId` — Delete a specific draft
 
 ## Desktop (Electron) Build
 

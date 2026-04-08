@@ -155,6 +155,9 @@ func (h *FileHandler) Upload(c echo.Context) error {
 }
 
 // canDownloadFile is a pure authorization predicate extracted for testability.
+// Returns true for roles that have blanket download access or for the original uploader.
+// Work-order photo access for assigned maintenance technicians is handled separately
+// via the repo.IsFileLinkedToUserWorkOrder check in the Download handler.
 func canDownloadFile(userID, role string, uploadedBy *string) bool {
 	if role == "system_admin" || role == "inventory_pharmacist" {
 		return true
@@ -166,7 +169,14 @@ func canDownloadFile(userID, role string, uploadedBy *string) bool {
 }
 
 // Download streams a file by ID.
-// Only the uploader or an admin/privileged role may download a file.
+//
+// Authorization:
+//   - system_admin and inventory_pharmacist: always allowed.
+//   - Original uploader: always allowed.
+//   - maintenance_tech (and any other authenticated role): allowed when the file is
+//     linked via work_order_photos to a work order they submitted or are assigned to.
+//     This covers the prompt-critical repair workflow where technicians need to view
+//     photos attached to their orders even if they were not the uploader.
 func (h *FileHandler) Download(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -185,15 +195,23 @@ func (h *FileHandler) Download(c echo.Context) error {
 		})
 	}
 
-	// Object-level authorization: only the uploader or privileged roles may download
 	userID := middleware.GetUserID(c)
 	role := middleware.GetUserRole(c)
+
 	if !canDownloadFile(userID, role, managedFile.UploadedBy) {
-		return c.JSON(http.StatusForbidden, models.ErrorResponse{
-			Error:   "Access denied",
-			Code:    http.StatusForbidden,
-			Details: "You are not authorized to download this file",
-		})
+		// Secondary check: allow if the file is attached to a work order the user
+		// submitted or is assigned to (covers maintenance_tech photo access).
+		linked, linkErr := h.repo.IsFileLinkedToUserWorkOrder(id, userID)
+		if linkErr != nil {
+			logrus.WithError(linkErr).Warn("Failed to check work-order photo linkage for file download")
+		}
+		if !linked {
+			return c.JSON(http.StatusForbidden, models.ErrorResponse{
+				Error:   "Access denied",
+				Code:    http.StatusForbidden,
+				Details: "You are not authorized to download this file",
+			})
+		}
 	}
 
 	// Check if file exists on disk

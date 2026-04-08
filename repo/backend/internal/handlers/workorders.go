@@ -19,7 +19,7 @@ import (
 // The interface enables unit testing without a real database.
 type workOrderStore interface {
 	GetWorkOrderByID(id string) (*models.WorkOrder, error)
-	ListWorkOrders(status string, assignedTo string, page, pageSize int) ([]models.WorkOrder, int, error)
+	ListWorkOrders(status string, assignedTo string, submittedBy string, page, pageSize int) ([]models.WorkOrder, int, error)
 	CreateWorkOrder(wo *models.WorkOrder) error
 	UpdateWorkOrder(wo *models.WorkOrder) error
 	GetTechWithLeastOrders(trade string) (string, error)
@@ -85,14 +85,27 @@ func (h *WorkOrderHandler) ListWorkOrders(c echo.Context) error {
 		pageSize = 20
 	}
 
-	// If the user is a maintenance_tech, filter by assigned_to
-	assignedTo := ""
+	// Apply object-level visibility scoping based on role:
+	//   system_admin          → all work orders (no filter)
+	//   maintenance_tech      → only work orders assigned to them
+	//   all other roles       → only work orders they submitted
+	// This enforces least-privilege: a front-desk or learning-coordinator user
+	// cannot see work orders submitted by other staff.
 	role := middleware.GetUserRole(c)
-	if role == "maintenance_tech" {
-		assignedTo = middleware.GetUserID(c)
+	userID := middleware.GetUserID(c)
+
+	assignedTo := ""
+	submittedBy := ""
+	switch role {
+	case "system_admin":
+		// no additional filter — admins see everything
+	case "maintenance_tech":
+		assignedTo = userID
+	default:
+		submittedBy = userID
 	}
 
-	workOrders, total, err := h.repo.ListWorkOrders(status, assignedTo, page, pageSize)
+	workOrders, total, err := h.repo.ListWorkOrders(status, assignedTo, submittedBy, page, pageSize)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to list work orders")
 		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
@@ -133,12 +146,12 @@ func (h *WorkOrderHandler) CreateWorkOrder(c echo.Context) error {
 			Details: "Priority is required",
 		})
 	}
-	validPriorities := map[string]bool{"urgent": true, "high": true, "normal": true, "low": true}
+	validPriorities := map[string]bool{"urgent": true, "high": true, "normal": true}
 	if !validPriorities[req.Priority] {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Validation failed",
 			Code:    http.StatusBadRequest,
-			Details: "Priority must be one of: urgent, high, normal, low",
+			Details: "Priority must be one of: urgent, high, normal",
 		})
 	}
 	if req.Description == "" {

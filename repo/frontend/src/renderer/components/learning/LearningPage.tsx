@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { learningAPI } from '../../services/api';
 import { useFetch } from '../../hooks/useFetch';
+import { useDraftAutoSave } from '../../hooks/useDraftAutoSave';
 import type { LearningSubject, LearningChapter, KnowledgePoint, PaginatedResponse } from '../../types';
 import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorMessage from '../common/ErrorMessage';
@@ -39,6 +40,8 @@ const LearningPage: React.FC = () => {
   const [subjectFormErr, setSubjectFormErr] = useState('');
   const [subjectSubmitting, setSubjectSubmitting] = useState(false);
   const [subjectSuccess, setSubjectSuccess] = useState('');
+  // Draft auto-save: persists the subject form every 30 s
+  const { clearDraft: clearSubjectDraft } = useDraftAutoSave('learning_subject', null, subjectForm);
 
   // Chapters
   const [chapters, setChapters] = useState<LearningChapter[]>([]);
@@ -140,6 +143,7 @@ const LearningPage: React.FC = () => {
     try {
       await learningAPI.createSubject({ name: subjectForm.name.trim(), description: subjectForm.description.trim(), sort_order: subjectForm.sort_order });
       setSubjectSuccess('Subject created successfully');
+      clearSubjectDraft();
       setShowSubjectForm(false);
       setSubjectForm({ name: '', description: '', sort_order: 0 });
       refetchSubjects();

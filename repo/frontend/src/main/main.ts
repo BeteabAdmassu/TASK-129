@@ -581,8 +581,12 @@ app.whenReady().then(async () => {
     },
     onLock: () => {
       for (const win of windows) {
+        // Clear both token AND user object so isAuthenticated becomes false.
+        // Removing only medops_token leaves medops_user intact, which causes
+        // App.tsx to treat the session as authenticated and auto-redirect from
+        // /login back to the dashboard — bypassing the lock entirely.
         win.webContents.executeJavaScript(
-          `localStorage.removeItem('medops_token'); window.location.href = '/login';`,
+          `localStorage.removeItem('medops_token'); localStorage.removeItem('medops_user'); window.location.href = '/login';`,
         );
       }
     },

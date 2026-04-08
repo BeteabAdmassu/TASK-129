@@ -32,12 +32,19 @@ type stubWorkOrderStore struct {
 	linkedPhotos [][2]string
 	// photosToReturn is the photo list returned by GetWorkOrderPhotos.
 	photosToReturn []models.ManagedFile
+
+	// F-002: capture the filter arguments passed to ListWorkOrders so tests can
+	// assert that the handler applied the correct role-based scoping.
+	lastListAssignedTo  string
+	lastListSubmittedBy string
 }
 
 func (s *stubWorkOrderStore) GetWorkOrderByID(_ string) (*models.WorkOrder, error) {
 	return s.wo, nil
 }
-func (s *stubWorkOrderStore) ListWorkOrders(_ string, _ string, _, _ int) ([]models.WorkOrder, int, error) {
+func (s *stubWorkOrderStore) ListWorkOrders(_ string, assignedTo string, submittedBy string, _, _ int) ([]models.WorkOrder, int, error) {
+	s.lastListAssignedTo = assignedTo
+	s.lastListSubmittedBy = submittedBy
 	return nil, 0, nil
 }
 func (s *stubWorkOrderStore) CreateWorkOrder(_ *models.WorkOrder) error   { return nil }
@@ -627,6 +634,174 @@ func TestUpdateWorkOrder_AdvanceFromCancelled_IsRejected(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 when advancing from cancelled; got %d — body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ─── F-002: ListWorkOrders role-based scoping tests ──────────────────────────
+//
+// The handler must pass different filter arguments to the store based on the
+// caller's role:
+//   - system_admin   → no assignedTo / submittedBy filter (sees all)
+//   - maintenance_tech → assignedTo=userID, submittedBy=""
+//   - all others     → submittedBy=userID, assignedTo=""
+
+// TestListWorkOrders_SystemAdmin_NoFilter verifies that a system_admin call
+// reaches the store with empty assignedTo and submittedBy (unscoped list).
+func TestListWorkOrders_SystemAdmin_NoFilter(t *testing.T) {
+	store := &stubWorkOrderStore{}
+	h := &WorkOrderHandler{repo: store}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders", "uid-admin", "system_admin")
+	if err := h.ListWorkOrders(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200; got %d", rec.Code)
+	}
+	if store.lastListAssignedTo != "" {
+		t.Errorf("system_admin: assignedTo should be empty; got %q", store.lastListAssignedTo)
+	}
+	if store.lastListSubmittedBy != "" {
+		t.Errorf("system_admin: submittedBy should be empty; got %q", store.lastListSubmittedBy)
+	}
+}
+
+// TestListWorkOrders_MaintenanceTech_AssignedToFilter verifies that a
+// maintenance_tech call passes their userID as assignedTo, not submittedBy.
+func TestListWorkOrders_MaintenanceTech_AssignedToFilter(t *testing.T) {
+	store := &stubWorkOrderStore{}
+	h := &WorkOrderHandler{repo: store}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders", "uid-tech-1", "maintenance_tech")
+	if err := h.ListWorkOrders(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200; got %d", rec.Code)
+	}
+	if store.lastListAssignedTo != "uid-tech-1" {
+		t.Errorf("maintenance_tech: assignedTo should be userID; got %q", store.lastListAssignedTo)
+	}
+	if store.lastListSubmittedBy != "" {
+		t.Errorf("maintenance_tech: submittedBy should be empty; got %q", store.lastListSubmittedBy)
+	}
+}
+
+// TestListWorkOrders_FrontDesk_SubmitterFilter verifies that a front_desk user
+// can only list work orders they submitted (submittedBy=userID, assignedTo="").
+func TestListWorkOrders_FrontDesk_SubmitterFilter(t *testing.T) {
+	store := &stubWorkOrderStore{}
+	h := &WorkOrderHandler{repo: store}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders", "uid-fd-1", "front_desk")
+	if err := h.ListWorkOrders(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200; got %d", rec.Code)
+	}
+	if store.lastListSubmittedBy != "uid-fd-1" {
+		t.Errorf("front_desk: submittedBy should be userID; got %q", store.lastListSubmittedBy)
+	}
+	if store.lastListAssignedTo != "" {
+		t.Errorf("front_desk: assignedTo should be empty; got %q", store.lastListAssignedTo)
+	}
+}
+
+// TestListWorkOrders_LearningCoordinator_SubmitterFilter verifies that a
+// learning_coordinator (non-privileged role) is also scoped to submittedBy.
+func TestListWorkOrders_LearningCoordinator_SubmitterFilter(t *testing.T) {
+	store := &stubWorkOrderStore{}
+	h := &WorkOrderHandler{repo: store}
+
+	c, rec := echoCtx(http.MethodGet, "/work-orders", "uid-lc-1", "learning_coordinator")
+	if err := h.ListWorkOrders(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200; got %d", rec.Code)
+	}
+	if store.lastListSubmittedBy != "uid-lc-1" {
+		t.Errorf("learning_coordinator: submittedBy should be userID; got %q", store.lastListSubmittedBy)
+	}
+	if store.lastListAssignedTo != "" {
+		t.Errorf("learning_coordinator: assignedTo should be empty; got %q", store.lastListAssignedTo)
+	}
+}
+
+// ─── F-005: CreateWorkOrder priority validation tests ────────────────────────
+//
+// The backend validPriorities map must accept urgent/high/normal and reject
+// anything else (including "low", which was erroneously accepted before F-005).
+
+// TestCreateWorkOrder_LowPriority_Rejected verifies that priority "low" is
+// rejected with HTTP 400 (removed from validPriorities in F-005 fix).
+func TestCreateWorkOrder_LowPriority_Rejected(t *testing.T) {
+	store := &stubWorkOrderStore{}
+	h := &WorkOrderHandler{repo: store}
+
+	payload := map[string]interface{}{
+		"trade":       "plumbing",
+		"priority":    "low",
+		"description": "Dripping tap",
+		"location":    "Room 1",
+	}
+	c, rec := echoCtxJSON(http.MethodPost, "/work-orders", "uid-user", "front_desk", payload)
+
+	if err := h.CreateWorkOrder(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("priority 'low' should yield 400; got %d — body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCreateWorkOrder_InvalidPriority_Rejected verifies that an arbitrary
+// invalid priority string is rejected with 400.
+func TestCreateWorkOrder_InvalidPriority_Rejected(t *testing.T) {
+	store := &stubWorkOrderStore{}
+	h := &WorkOrderHandler{repo: store}
+
+	payload := map[string]interface{}{
+		"trade":       "electrical",
+		"priority":    "critical",
+		"description": "Power outage",
+		"location":    "Room 2",
+	}
+	c, rec := echoCtxJSON(http.MethodPost, "/work-orders", "uid-user", "front_desk", payload)
+
+	if err := h.CreateWorkOrder(c); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("priority 'critical' should yield 400; got %d", rec.Code)
+	}
+}
+
+// TestCreateWorkOrder_ValidPriorities_AllAccepted verifies that all three
+// schema-valid priority values (urgent, high, normal) result in 201.
+func TestCreateWorkOrder_ValidPriorities_AllAccepted(t *testing.T) {
+	for _, priority := range []string{"urgent", "high", "normal"} {
+		priority := priority
+		t.Run(priority, func(t *testing.T) {
+			store := &stubWorkOrderStore{}
+			h := &WorkOrderHandler{repo: store}
+
+			payload := map[string]interface{}{
+				"trade":       "hvac",
+				"priority":    priority,
+				"description": "HVAC issue",
+				"location":    "Room 3",
+			}
+			c, rec := echoCtxJSON(http.MethodPost, "/work-orders", "uid-user", "front_desk", payload)
+
+			if err := h.CreateWorkOrder(c); err != nil {
+				t.Fatalf("handler error for priority %q: %v", priority, err)
+			}
+			if rec.Code != http.StatusCreated {
+				t.Errorf("priority %q should yield 201; got %d — body: %s", priority, rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

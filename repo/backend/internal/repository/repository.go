@@ -779,8 +779,10 @@ func (r *Repository) SearchKnowledgePoints(query string, page, pageSize int) ([]
 
 // ---------- Work Orders ----------
 
-// ListWorkOrders returns paginated work orders with optional status and assignee filters.
-func (r *Repository) ListWorkOrders(status string, assignedTo string, page, pageSize int) ([]models.WorkOrder, int, error) {
+// ListWorkOrders returns paginated work orders with optional status, assignee, and submitter filters.
+// Pass submittedBy to restrict results to a specific submitter (used for non-admin/non-maintenance roles
+// so they see only the work orders they personally created).
+func (r *Repository) ListWorkOrders(status string, assignedTo string, submittedBy string, page, pageSize int) ([]models.WorkOrder, int, error) {
 	offset := (page - 1) * pageSize
 
 	query := `SELECT id, submitted_by, assigned_to, trade, priority, sla_deadline, status, description, location, parts_cost, labor_cost, rating, closed_at, created_at,
@@ -797,6 +799,11 @@ func (r *Repository) ListWorkOrders(status string, assignedTo string, page, page
 	if assignedTo != "" {
 		query += fmt.Sprintf(" AND assigned_to = $%d", argIdx)
 		args = append(args, assignedTo)
+		argIdx++
+	}
+	if submittedBy != "" {
+		query += fmt.Sprintf(" AND submitted_by = $%d", argIdx)
+		args = append(args, submittedBy)
 		argIdx++
 	}
 
@@ -1742,6 +1749,27 @@ func (r *Repository) GetWorkOrderPhotos(workOrderID string) ([]models.ManagedFil
 		files = append(files, f)
 	}
 	return files, rows.Err()
+}
+
+// IsFileLinkedToUserWorkOrder returns true when the given file is attached (via
+// work_order_photos) to any work order where userID is either the submitter or the
+// assigned technician, within this tenant.
+// This is used to grant maintenance technicians download access to photos on their
+// assigned orders even when they are not the original file uploader.
+func (r *Repository) IsFileLinkedToUserWorkOrder(fileID, userID string) (bool, error) {
+	var count int
+	err := r.DB.QueryRow(
+		`SELECT COUNT(*) FROM work_order_photos wop
+		 JOIN work_orders wo ON wo.id = wop.work_order_id
+		 WHERE wop.file_id = $1
+		   AND (wo.submitted_by = $2 OR wo.assigned_to = $2)
+		   AND wo.tenant_id = $3`,
+		fileID, userID, r.tenantID,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("is file linked to user work order: %w", err)
+	}
+	return count > 0, nil
 }
 
 // ListExpiredFiles returns managed files whose retention_until is set and has passed.
