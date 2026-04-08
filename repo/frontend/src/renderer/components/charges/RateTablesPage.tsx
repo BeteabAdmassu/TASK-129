@@ -51,6 +51,7 @@ const RateTablesPage: React.FC = () => {
   }, []);
 
   const [showCreate, setShowCreate] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '', type: 'distance' as string, tiers: '[{"min": 0, "max": 10, "rate": 5}]',
     fuel_surcharge_pct: '0', taxable: false, effective_date: '',
@@ -66,6 +67,21 @@ const RateTablesPage: React.FC = () => {
   const csvInputRef = useRef<HTMLInputElement>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importMsg, setImportMsg] = useState('');
+
+  const handleEdit = (rt: RateTable) => {
+    setEditingId(rt.id);
+    setForm({
+      name: rt.name,
+      type: rt.type,
+      tiers: JSON.stringify(rt.tiers, null, 2),
+      fuel_surcharge_pct: String(rt.fuel_surcharge_pct),
+      taxable: rt.taxable,
+      effective_date: rt.effective_date ? rt.effective_date.slice(0, 10) : '',
+    });
+    setFormErr('');
+    setShowCreate(true);
+    setCtxMenu(null);
+  };
 
   const handleCreate = async () => {
     if (!form.name.trim()) { setFormErr('Name is required'); return; }
@@ -90,25 +106,33 @@ const RateTablesPage: React.FC = () => {
     if (isNaN(fuelPct) || fuelPct < 0) { setFormErr('Fuel surcharge must be a non-negative number'); return; }
     if (!form.effective_date) { setFormErr('Effective date is required'); return; }
 
+    const payload = {
+      name: form.name.trim(),
+      type: form.type,
+      tiers,
+      fuel_surcharge_pct: fuelPct,
+      taxable: form.taxable,
+      effective_date: form.effective_date,
+    };
+
     setSubmitting(true);
     setFormErr('');
     try {
-      await chargesAPI.createRateTable({
-        name: form.name.trim(),
-        type: form.type,
-        tiers,
-        fuel_surcharge_pct: fuelPct,
-        taxable: form.taxable,
-        effective_date: form.effective_date,
-      });
-      setSuccessMsg('Rate table created successfully');
-      clearRateDraft();
+      if (editingId) {
+        await chargesAPI.updateRateTable(editingId, payload);
+        setSuccessMsg('Rate table updated successfully');
+      } else {
+        await chargesAPI.createRateTable(payload);
+        setSuccessMsg('Rate table created successfully');
+        clearRateDraft();
+      }
       setShowCreate(false);
+      setEditingId(null);
       setForm({ name: '', type: 'distance', tiers: '[{"min": 0, "max": 10, "rate": 5}]', fuel_surcharge_pct: '0', taxable: false, effective_date: '' });
       fetchRateTables();
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (e: any) {
-      setFormErr(e.response?.data?.error || 'Failed to create rate table');
+      setFormErr(e.response?.data?.error || (editingId ? 'Failed to update rate table' : 'Failed to create rate table'));
     } finally {
       setSubmitting(false);
     }
@@ -243,14 +267,14 @@ const RateTablesPage: React.FC = () => {
               label: expandedId === ctxMenu.rt.id ? 'Collapse Tiers' : 'View Tiers',
               onClick: () => { setExpandedId(expandedId === ctxMenu.rt.id ? null : ctxMenu.rt.id); setCtxMenu(null); },
             },
-            { label: 'Edit Rate Table', onClick: () => { setShowCreate(true); setCtxMenu(null); } },
+            { label: 'Edit Rate Table', onClick: () => handleEdit(ctxMenu.rt) },
           ]}
         />
       )}
 
-      {/* Create Modal */}
+      {/* Create / Edit Modal */}
       {showCreate && (
-        <Modal title="New Rate Table" onClose={() => { setShowCreate(false); setFormErr(''); }} width={560}>
+        <Modal title={editingId ? 'Edit Rate Table' : 'New Rate Table'} onClose={() => { setShowCreate(false); setEditingId(null); setFormErr(''); }} width={560}>
           {formErr && <div style={{ color: '#dc3545', marginBottom: '0.75rem', fontSize: '0.85rem' }}>{formErr}</div>}
           <div style={{ marginBottom: '0.75rem' }}>
             <label style={{ display: 'block', marginBottom: '0.25rem', fontWeight: 500 }}>Name *</label>
@@ -290,9 +314,9 @@ const RateTablesPage: React.FC = () => {
             </label>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-            <button onClick={() => { setShowCreate(false); setFormErr(''); }} style={btnSecondary}>Cancel</button>
+            <button onClick={() => { setShowCreate(false); setEditingId(null); setFormErr(''); }} style={btnSecondary}>Cancel</button>
             <button onClick={handleCreate} disabled={submitting} style={submitting ? btnDisabled : btnPrimary}>
-              {submitting ? 'Creating...' : 'Create Rate Table'}
+              {submitting ? (editingId ? 'Saving...' : 'Creating...') : (editingId ? 'Save Changes' : 'Create Rate Table')}
             </button>
           </div>
         </Modal>

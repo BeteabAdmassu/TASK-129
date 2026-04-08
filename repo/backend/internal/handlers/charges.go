@@ -831,7 +831,13 @@ func (h *ChargeHandler) ExportStatement(c echo.Context) error {
 	now := time.Now()
 	statement.Status = "paid"
 	statement.PaidAt = &now
-	h.repo.UpdateStatement(statement)
+	if err := h.repo.UpdateStatement(statement); err != nil {
+		logrus.WithError(err).Error("Failed to persist statement paid status during export")
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error: "Failed to record payment status; export aborted",
+			Code:  http.StatusInternalServerError,
+		})
+	}
 
 	userID := middleware.GetUserID(c)
 	details, _ := json.Marshal(map[string]string{

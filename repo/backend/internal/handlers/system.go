@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -597,6 +598,10 @@ func (h *SystemHandler) ApplyUpdate(c echo.Context) error {
 			Code:  http.StatusInternalServerError,
 		})
 	}
+	// Sort lexicographically so migrations run in the documented order (H-01).
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
 
 	applied := 0
 	for _, entry := range entries {

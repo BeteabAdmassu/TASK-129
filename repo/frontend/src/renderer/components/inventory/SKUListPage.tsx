@@ -57,6 +57,30 @@ const SKUListPage: React.FC = () => {
   const [opError, setOpError] = useState<string | null>(null);
   const [opSuccess, setOpSuccess] = useState<string | null>(null);
 
+  const handleExportPrint = (sku: SKU) => {
+    // Build a single-row CSV for the chosen SKU and trigger a browser download.
+    const headers = ['ID', 'Name', 'NDC', 'UPC', 'Unit of Measure', 'Storage Location', 'Low Stock Threshold', 'Active'];
+    const row = [
+      sku.id,
+      sku.name,
+      sku.ndc || '',
+      sku.upc || '',
+      sku.unit_of_measure,
+      sku.storage_location || '',
+      String(sku.low_stock_threshold),
+      sku.is_active ? 'Yes' : 'No',
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`);
+    const csv = [headers.join(','), row.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sku-${sku.id.slice(0, 8)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setCtxMenu(null);
+  };
+
   const [searchTimeout, setSearchTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSearchChange = (value: string) => {
@@ -314,7 +338,7 @@ const SKUListPage: React.FC = () => {
             },
             {
               label: 'Export / Print',
-              onClick: () => { navigate(`/skus/${ctxMenu.sku.id}`); },
+              onClick: () => handleExportPrint(ctxMenu.sku),
             },
           ]}
         />

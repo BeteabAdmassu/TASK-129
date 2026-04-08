@@ -144,6 +144,30 @@ const WorkOrdersPage: React.FC = () => {
     }
   };
 
+  const handleExportPrint = (order: WorkOrder) => {
+    const headers = ['ID', 'Trade', 'Priority', 'Status', 'Location', 'Description', 'Submitted By', 'Assigned To', 'Created At'];
+    const row = [
+      order.id,
+      order.trade,
+      order.priority,
+      order.status,
+      order.location || '',
+      order.description || '',
+      order.submitted_by || '',
+      order.assigned_to || '',
+      order.created_at ? new Date(order.created_at).toISOString() : '',
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`);
+    const csv = [headers.join(','), row.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `work-order-${order.id.slice(0, 8)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setCtxMenu(null);
+  };
+
   const columns = [
     { key: 'id', header: 'ID', sortable: true, render: (wo: WorkOrder) => <span style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{wo.id.slice(0, 8)}</span> },
     { key: 'trade', header: 'Trade', sortable: true, render: (wo: WorkOrder) => <span style={{ textTransform: 'capitalize' as const }}>{wo.trade}</span> },
@@ -262,7 +286,7 @@ const WorkOrdersPage: React.FC = () => {
           },
           {
             label: 'Export / Print',
-            onClick: () => navigate(`/work-orders/${ctxMenu.order.id}`),
+            onClick: () => handleExportPrint(ctxMenu.order),
           },
         ]} />
       )}

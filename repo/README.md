@@ -293,8 +293,8 @@ update-v1.2.0.zip
 
 **Apply an update** (System Config → Apply Offline Update):
 1. Before any changes: a `pg_dump` snapshot of the current database is written to `DATA_DIR/backups/` and the current `DATA_DIR/active/` artifacts (binary + frontend) are snapshotted to `DATA_DIR/versions/<timestamp>/`.
-2. SQL migrations are applied in lexicographic order.
-3. Backend binary and frontend assets (if included) are written to `DATA_DIR/active/`.
+2. Backend binary and frontend assets (if included in the package) are extracted to `DATA_DIR/active/`.
+3. SQL migrations are applied in lexicographic order.
 4. Version history is appended to `DATA_DIR/updates/version_history.json`.
 5. The backend subprocess is restarted via Electron IPC; renderer windows reload from the new frontend assets.
 

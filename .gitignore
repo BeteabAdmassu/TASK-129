@@ -1,4 +1,7 @@
 .tmp2/
+.claude/
+repo/.claude/
+*.claude/
 node_modules/
 __pycache__/
 .env
