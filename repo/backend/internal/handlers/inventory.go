@@ -160,7 +160,7 @@ func (h *InventoryHandler) UpdateSKU(c echo.Context) error {
 	}
 
 	sku, err := h.repo.GetSKUByID(id)
-	if err != nil {
+	if err != nil || sku == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "SKU not found",
 			Code:    http.StatusNotFound,
@@ -457,7 +457,7 @@ func (h *InventoryHandler) Dispense(c echo.Context) error {
 
 	// Get batch
 	batch, err := h.repo.GetBatchByID(req.BatchID)
-	if err != nil {
+	if err != nil || batch == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Batch not found",
 			Code:    http.StatusNotFound,
@@ -627,7 +627,7 @@ func (h *InventoryHandler) Adjust(c echo.Context) error {
 
 	// Get batch
 	batch, err := h.repo.GetBatchByID(req.BatchID)
-	if err != nil {
+	if err != nil || batch == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Batch not found",
 			Code:    http.StatusNotFound,
@@ -793,7 +793,7 @@ func (h *InventoryHandler) GetStocktake(c echo.Context) error {
 	}
 
 	stocktake, err := h.repo.GetStocktakeByID(id)
-	if err != nil {
+	if err != nil || stocktake == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Stocktake not found",
 			Code:    http.StatusNotFound,
@@ -816,7 +816,7 @@ func (h *InventoryHandler) UpdateStocktakeLines(c echo.Context) error {
 
 	// Verify stocktake exists and is open
 	stocktake, err := h.repo.GetStocktakeByID(id)
-	if err != nil {
+	if err != nil || stocktake == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Stocktake not found",
 			Code:    http.StatusNotFound,
@@ -903,7 +903,7 @@ func (h *InventoryHandler) CompleteStocktake(c echo.Context) error {
 	}
 
 	stocktake, err := h.repo.GetStocktakeByID(id)
-	if err != nil {
+	if err != nil || stocktake == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Stocktake not found",
 			Code:    http.StatusNotFound,
@@ -929,7 +929,7 @@ func (h *InventoryHandler) CompleteStocktake(c echo.Context) error {
 
 	// Fetch the completed stocktake
 	completed, err := h.repo.GetStocktakeByID(id)
-	if err != nil {
+	if err != nil || completed == nil {
 		logrus.WithError(err).Error("Failed to fetch completed stocktake")
 		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error: "Stocktake completed but failed to retrieve result",

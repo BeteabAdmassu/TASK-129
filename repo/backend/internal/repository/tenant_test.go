@@ -451,6 +451,66 @@ func TestCreateStatement_TenantPersisted(t *testing.T) {
 	assertArg(t, cap, "CreateStatement", testTenantID)
 }
 
+// ─── Tests: I-002 — tenant-isolation gaps fixed in audit remediation ──────────
+
+func TestGetSessionPackages_TenantScoped(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.GetSessionPackages("member-1")
+	assertSQL(t, cap, "GetSessionPackages", "tenant_id")
+	assertArg(t, cap, "GetSessionPackages", testTenantID)
+	assertPlaceholders(t, cap, "GetSessionPackages", 2)
+}
+
+func TestUpdateSessionPackage_TenantScoped(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.UpdateSessionPackage(&models.SessionPackage{ID: "pkg-1", MemberID: "member-1"})
+	assertSQL(t, cap, "UpdateSessionPackage", "tenant_id")
+	assertArg(t, cap, "UpdateSessionPackage", testTenantID)
+}
+
+func TestCreateSessionPackage_TenantGuard(t *testing.T) {
+	repo, cap := newRepo(t)
+	// Capturing driver returns RowsAffected=0, so function returns an error (member not found).
+	// We only care that the SQL and bound args contain tenant_id.
+	repo.CreateSessionPackage(&models.SessionPackage{MemberID: "member-1"})
+	assertSQL(t, cap, "CreateSessionPackage", "tenant_id")
+	assertArg(t, cap, "CreateSessionPackage", testTenantID)
+}
+
+func TestGetStatementLineItems_TenantScoped(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.GetStatementLineItems("stmt-1")
+	assertSQL(t, cap, "GetStatementLineItems", "tenant_id")
+	assertArg(t, cap, "GetStatementLineItems", testTenantID)
+	assertPlaceholders(t, cap, "GetStatementLineItems", 2)
+}
+
+func TestCreateLineItem_TenantGuard(t *testing.T) {
+	repo, cap := newRepo(t)
+	// Capturing driver returns RowsAffected=0, so function returns an error (statement not found).
+	// We only care that the SQL and bound args contain tenant_id.
+	repo.CreateLineItem(&models.ChargeLineItem{StatementID: "stmt-1"})
+	assertSQL(t, cap, "CreateLineItem", "tenant_id")
+	assertArg(t, cap, "CreateLineItem", testTenantID)
+}
+
+func TestLinkPhotoToWorkOrder_TenantScoped(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.LinkPhotoToWorkOrder("wo-1", "file-1")
+	assertSQL(t, cap, "LinkPhotoToWorkOrder", "tenant_id")
+	assertArg(t, cap, "LinkPhotoToWorkOrder", testTenantID)
+	// Both work_orders and managed_files EXISTS checks must reference tenant_id.
+	assertPlaceholders(t, cap, "LinkPhotoToWorkOrder", 5)
+}
+
+func TestGetLatestStoredValueAdd_TenantScoped(t *testing.T) {
+	repo, cap := newRepo(t)
+	repo.GetLatestStoredValueAdd("member-1")
+	assertSQL(t, cap, "GetLatestStoredValueAdd", "tenant_id")
+	assertArg(t, cap, "GetLatestStoredValueAdd", testTenantID)
+	assertPlaceholders(t, cap, "GetLatestStoredValueAdd", 2)
+}
+
 // ─── Isolation invariant: different tenant IDs produce different bound args ───
 
 // TestTenantArgIsConfiguredValue fails if the repository passes a hardcoded

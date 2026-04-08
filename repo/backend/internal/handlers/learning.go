@@ -404,7 +404,7 @@ func (h *LearningHandler) UpdateKnowledgePoint(c echo.Context) error {
 	}
 
 	kp, err := h.repo.GetKnowledgePointByID(id)
-	if err != nil {
+	if err != nil || kp == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Knowledge point not found",
 			Code:    http.StatusNotFound,
@@ -654,7 +654,7 @@ func (h *LearningHandler) ExportContent(c echo.Context) error {
 	}
 
 	kp, err := h.repo.GetKnowledgePointByID(id)
-	if err != nil {
+	if err != nil || kp == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "Knowledge point not found",
 			Code:    http.StatusNotFound,

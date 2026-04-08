@@ -160,24 +160,29 @@ func TestStatementIsApprovable_PaidIsNot(t *testing.T) {
 	}
 }
 
-// TestApproveStatement_SameUserAsReconciler_Returns403 verifies the approver
-// distinctness rule: the user who reconciled (approved_by_1) cannot also approve.
-func TestApproveStatement_SameUserAsReconciler_Returns403(t *testing.T) {
-	// The handler enforces: if statement.ApprovedBy1 != nil && *statement.ApprovedBy1 == userID → 403.
-	// We test the underlying condition directly.
-	reconcilerID := "user-alice"
-	approverID := "user-alice" // same user — must be rejected
+// TestApproverAllowed_* tests the approverAllowed helper that guards the two-step
+// approval distinctness rule in ApproveStatement. The rule: the person who reconciled
+// (approved_by_1) cannot be the same person who performs the final approval.
 
-	sameUser := reconcilerID == approverID
-	if !sameUser {
-		t.Error("test setup error: reconciler and approver IDs should match")
+func TestApproverAllowed_SameUserForbidden(t *testing.T) {
+	id := "user-alice"
+	if approverAllowed(&id, "user-alice") {
+		t.Error("same user as reconciler must not be allowed to approve (approverAllowed must return false)")
 	}
+}
 
-	// Confirm a different user would pass the check.
-	differentApproverID := "user-bob"
-	differentUser := reconcilerID == differentApproverID
-	if differentUser {
-		t.Error("test setup error: different approver IDs should not match")
+func TestApproverAllowed_DifferentUserPermitted(t *testing.T) {
+	id := "user-alice"
+	if !approverAllowed(&id, "user-bob") {
+		t.Error("different user from reconciler must be allowed to approve")
+	}
+}
+
+func TestApproverAllowed_NotYetReconciled(t *testing.T) {
+	// When approved_by_1 is nil the statement has not been reconciled yet;
+	// any user may perform the first-step approval.
+	if !approverAllowed(nil, "user-alice") {
+		t.Error("unreconciled statement (approved_by_1 == nil) must be approvable by any user")
 	}
 }
 

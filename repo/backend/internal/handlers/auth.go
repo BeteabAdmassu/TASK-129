@@ -156,7 +156,7 @@ func (h *AuthHandler) GetMe(c echo.Context) error {
 	}
 
 	user, err := h.repo.GetUserByID(userID)
-	if err != nil {
+	if err != nil || user == nil {
 		logrus.WithError(err).WithField("user_id", userID).Error("Failed to get user profile")
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error: "User not found",
@@ -196,7 +196,7 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 	}
 
 	user, err := h.repo.GetUserByID(userID)
-	if err != nil {
+	if err != nil || user == nil {
 		logrus.WithError(err).Error("Failed to get user for password change")
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error: "User not found",

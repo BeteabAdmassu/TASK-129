@@ -518,6 +518,12 @@ func statementIsReconcilable(status string) bool { return status == "pending" }
 // statementIsApprovable returns true only when the statement is in reconciled status.
 func statementIsApprovable(status string) bool { return status == "reconciled" }
 
+// approverAllowed returns true when the approving user is distinct from the reconciler.
+// The two-step approval rule requires the approver and reconciler to be different people.
+func approverAllowed(reconciledBy *string, approverID string) bool {
+	return reconciledBy == nil || *reconciledBy != approverID
+}
+
 // statementVarianceExceedsThreshold returns true when ABS(total - expected) > 25.
 // This is the correct reconciliation escalation check per the business rule.
 func statementVarianceExceedsThreshold(totalAmount, expectedTotal float64) bool {
@@ -666,7 +672,7 @@ func (h *ChargeHandler) ApproveStatement(c echo.Context) error {
 	}
 
 	// Two-step approval: reconciled → approved; approver must differ from reconciler.
-	if statement.ApprovedBy1 != nil && *statement.ApprovedBy1 == userID {
+	if !approverAllowed(statement.ApprovedBy1, userID) {
 		return c.JSON(http.StatusForbidden, models.ErrorResponse{
 			Error:   "Approver cannot be the same as reconciler",
 			Code:    http.StatusForbidden,

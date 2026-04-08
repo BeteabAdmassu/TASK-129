@@ -160,7 +160,7 @@ func (h *UserHandler) UpdateUser(c echo.Context) error {
 	}
 
 	user, err := h.repo.GetUserByID(id)
-	if err != nil {
+	if err != nil || user == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "User not found",
 			Code:    http.StatusNotFound,
@@ -234,7 +234,7 @@ func (h *UserHandler) DeleteUser(c echo.Context) error {
 	}
 
 	user, err := h.repo.GetUserByID(id)
-	if err != nil {
+	if err != nil || user == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "User not found",
 			Code:    http.StatusNotFound,
@@ -294,8 +294,8 @@ func (h *UserHandler) UnlockUser(c echo.Context) error {
 	}
 
 	// Verify user exists
-	_, err := h.repo.GetUserByID(id)
-	if err != nil {
+	u, err := h.repo.GetUserByID(id)
+	if err != nil || u == nil {
 		return c.JSON(http.StatusNotFound, models.ErrorResponse{
 			Error:   "User not found",
 			Code:    http.StatusNotFound,

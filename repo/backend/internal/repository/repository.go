@@ -1129,11 +1129,15 @@ func (r *Repository) CreateMemberTransaction(tx *models.MemberTransaction) error
 	return nil
 }
 
-// GetSessionPackages retrieves all session packages for a member.
+// GetSessionPackages retrieves all session packages for a member, scoped to the current tenant
+// via a JOIN through the members table.
 func (r *Repository) GetSessionPackages(memberID string) ([]models.SessionPackage, error) {
 	rows, err := r.DB.Query(
-		`SELECT id, member_id, package_name, total_sessions, remaining_sessions, expires_at
-		 FROM session_packages WHERE member_id = $1 ORDER BY expires_at`, memberID,
+		`SELECT sp.id, sp.member_id, sp.package_name, sp.total_sessions, sp.remaining_sessions, sp.expires_at
+		 FROM session_packages sp
+		 JOIN members m ON m.id = sp.member_id
+		 WHERE sp.member_id = $1 AND m.tenant_id = $2
+		 ORDER BY sp.expires_at`, memberID, r.tenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get session packages: %w", err)
@@ -1151,11 +1155,13 @@ func (r *Repository) GetSessionPackages(memberID string) ([]models.SessionPackag
 	return pkgs, rows.Err()
 }
 
-// UpdateSessionPackage updates an existing session package.
+// UpdateSessionPackage updates an existing session package, scoped to the current tenant
+// by requiring the associated member to belong to this tenant.
 func (r *Repository) UpdateSessionPackage(pkg *models.SessionPackage) error {
 	_, err := r.DB.Exec(
-		`UPDATE session_packages SET package_name=$1, total_sessions=$2, remaining_sessions=$3, expires_at=$4 WHERE id=$5`,
-		pkg.PackageName, pkg.TotalSessions, pkg.RemainingSessions, pkg.ExpiresAt, pkg.ID,
+		`UPDATE session_packages SET package_name=$1, total_sessions=$2, remaining_sessions=$3, expires_at=$4
+		 WHERE id=$5 AND member_id IN (SELECT id FROM members WHERE tenant_id=$6)`,
+		pkg.PackageName, pkg.TotalSessions, pkg.RemainingSessions, pkg.ExpiresAt, pkg.ID, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("update session package: %w", err)
@@ -1163,18 +1169,23 @@ func (r *Repository) UpdateSessionPackage(pkg *models.SessionPackage) error {
 	return nil
 }
 
-// CreateSessionPackage inserts a new session package.
+// CreateSessionPackage inserts a new session package, enforcing that the member belongs
+// to the current tenant before inserting.
 func (r *Repository) CreateSessionPackage(pkg *models.SessionPackage) error {
 	if pkg.ID == "" {
 		pkg.ID = uuid.New().String()
 	}
-	_, err := r.DB.Exec(
+	res, err := r.DB.Exec(
 		`INSERT INTO session_packages (id, member_id, package_name, total_sessions, remaining_sessions, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		pkg.ID, pkg.MemberID, pkg.PackageName, pkg.TotalSessions, pkg.RemainingSessions, pkg.ExpiresAt,
+		 SELECT $1, $2, $3, $4, $5, $6
+		 WHERE EXISTS (SELECT 1 FROM members WHERE id = $2 AND tenant_id = $7)`,
+		pkg.ID, pkg.MemberID, pkg.PackageName, pkg.TotalSessions, pkg.RemainingSessions, pkg.ExpiresAt, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("create session package: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("create session package: member not found in tenant")
 	}
 	return nil
 }
@@ -1344,11 +1355,15 @@ func (r *Repository) UpdateStatement(stmt *models.ChargeStatement) error {
 	return nil
 }
 
-// GetStatementLineItems retrieves all line items for a charge statement.
+// GetStatementLineItems retrieves all line items for a charge statement, scoped to the
+// current tenant via a JOIN through the charge_statements table.
 func (r *Repository) GetStatementLineItems(statementID string) ([]models.ChargeLineItem, error) {
 	rows, err := r.DB.Query(
-		`SELECT id, statement_id, description, quantity, unit_price, surcharge, tax, total
-		 FROM charge_line_items WHERE statement_id = $1 ORDER BY id`, statementID,
+		`SELECT cli.id, cli.statement_id, cli.description, cli.quantity, cli.unit_price, cli.surcharge, cli.tax, cli.total
+		 FROM charge_line_items cli
+		 JOIN charge_statements cs ON cs.id = cli.statement_id
+		 WHERE cli.statement_id = $1 AND cs.tenant_id = $2
+		 ORDER BY cli.id`, statementID, r.tenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get statement line items: %w", err)
@@ -1366,18 +1381,23 @@ func (r *Repository) GetStatementLineItems(statementID string) ([]models.ChargeL
 	return items, rows.Err()
 }
 
-// CreateLineItem inserts a new charge line item.
+// CreateLineItem inserts a new charge line item, enforcing that the parent statement
+// belongs to the current tenant before inserting.
 func (r *Repository) CreateLineItem(item *models.ChargeLineItem) error {
 	if item.ID == "" {
 		item.ID = uuid.New().String()
 	}
-	_, err := r.DB.Exec(
+	res, err := r.DB.Exec(
 		`INSERT INTO charge_line_items (id, statement_id, description, quantity, unit_price, surcharge, tax, total)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		item.ID, item.StatementID, item.Description, item.Quantity, item.UnitPrice, item.Surcharge, item.Tax, item.Total,
+		 SELECT $1, $2, $3, $4, $5, $6, $7, $8
+		 WHERE EXISTS (SELECT 1 FROM charge_statements WHERE id = $2 AND tenant_id = $9)`,
+		item.ID, item.StatementID, item.Description, item.Quantity, item.UnitPrice, item.Surcharge, item.Tax, item.Total, r.tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("create line item: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("create line item: statement not found in tenant")
 	}
 	return nil
 }
@@ -1594,14 +1614,15 @@ func (r *Repository) GetSessionPackage(id string) (*models.SessionPackage, error
 	return p, nil
 }
 
-// GetLatestStoredValueAdd retrieves the most recent stored_value_add transaction for a member.
+// GetLatestStoredValueAdd retrieves the most recent stored_value_add transaction for a member,
+// scoped to the current tenant.
 func (r *Repository) GetLatestStoredValueAdd(memberID string) (*models.MemberTransaction, error) {
 	t := &models.MemberTransaction{}
 	err := r.DB.QueryRow(
 		`SELECT id, member_id, type, amount, description, performed_by, created_at
 		 FROM member_transactions
-		 WHERE member_id = $1 AND type = 'stored_value_add'
-		 ORDER BY created_at DESC LIMIT 1`, memberID,
+		 WHERE member_id = $1 AND type = 'stored_value_add' AND tenant_id = $2
+		 ORDER BY created_at DESC LIMIT 1`, memberID, r.tenantID,
 	).Scan(&t.ID, &t.MemberID, &t.Type, &t.Amount, &t.Description, &t.PerformedBy, &t.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -1672,7 +1693,8 @@ func (r *Repository) GetFilesByIDs(ids []string) ([]models.ManagedFile, error) {
 	return files, rows.Err()
 }
 
-// LinkPhotoToWorkOrder creates a persistent link between a work order and a managed file.
+// LinkPhotoToWorkOrder creates a persistent link between a work order and a managed file,
+// enforcing that the work order belongs to the current tenant.
 func (r *Repository) LinkPhotoToWorkOrder(workOrderID, fileID string) (*models.WorkOrderPhoto, error) {
 	photo := &models.WorkOrderPhoto{
 		ID:          uuid.New().String(),
@@ -1682,9 +1704,11 @@ func (r *Repository) LinkPhotoToWorkOrder(workOrderID, fileID string) (*models.W
 	}
 	_, err := r.DB.Exec(
 		`INSERT INTO work_order_photos (id, work_order_id, file_id, created_at)
-		 VALUES ($1, $2, $3, $4)
+		 SELECT $1, $2, $3, $4
+		 WHERE EXISTS (SELECT 1 FROM work_orders   WHERE id = $2 AND tenant_id = $5)
+		   AND EXISTS (SELECT 1 FROM managed_files WHERE id = $3 AND tenant_id = $5)
 		 ON CONFLICT (work_order_id, file_id) DO NOTHING`,
-		photo.ID, photo.WorkOrderID, photo.FileID, photo.CreatedAt,
+		photo.ID, photo.WorkOrderID, photo.FileID, photo.CreatedAt, r.tenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("link photo to work order: %w", err)
@@ -1752,21 +1776,6 @@ func (r *Repository) DeleteFileRecord(id string) error {
 	return nil
 }
 
-// GetDraftByID retrieves a draft checkpoint by its ID.
-func (r *Repository) GetDraftByID(id string) (*models.DraftCheckpoint, error) {
-	d := &models.DraftCheckpoint{}
-	err := r.DB.QueryRow(
-		`SELECT id, user_id, form_type, form_id, state_json, saved_at
-		 FROM draft_checkpoints WHERE id = $1`, id,
-	).Scan(&d.ID, &d.UserID, &d.FormType, &d.FormID, &d.StateJSON, &d.SavedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get draft by id: %w", err)
-	}
-	return d, nil
-}
 
 // GetConfig returns system configuration as a key-value map.
 func (r *Repository) GetConfig() (map[string]string, error) {
@@ -1787,14 +1796,6 @@ func (r *Repository) GetConfig() (map[string]string, error) {
 	return cfg, rows.Err()
 }
 
-// DeleteDraftByID removes a draft by its ID.
-func (r *Repository) DeleteDraftByID(id string) error {
-	_, err := r.DB.Exec(`DELETE FROM draft_checkpoints WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("delete draft by id: %w", err)
-	}
-	return nil
-}
 
 // UpdateConfig upserts a system configuration key-value pair.
 func (r *Repository) UpdateConfig(key, value string) error {
