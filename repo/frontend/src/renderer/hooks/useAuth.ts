@@ -9,6 +9,29 @@ export function useAuth() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // bootstrapping is true while we are validating a stored token against /auth/me.
+  // Protected routes must gate rendering until this is false.
+  const [bootstrapping, setBootstrapping] = useState(() => !!localStorage.getItem('medops_token'));
+
+  // On mount: validate stored token with the server. If the token is expired or
+  // revoked, the server returns 401 and the axios interceptor clears localStorage
+  // and redirects to /login. We also clear local state here to be safe.
+  useEffect(() => {
+    const token = localStorage.getItem('medops_token');
+    if (!token) {
+      setBootstrapping(false);
+      return;
+    }
+    authAPI.getMe()
+      .then(res => setUser(res.data))
+      .catch(() => {
+        localStorage.removeItem('medops_token');
+        localStorage.removeItem('medops_user');
+        setUser(null);
+      })
+      .finally(() => setBootstrapping(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const login = useCallback(async (username: string, password: string) => {
     setLoading(true);
@@ -46,5 +69,5 @@ export function useAuth() {
     [user]
   );
 
-  return { user, loading, error, login, logout, isAuthenticated, hasRole };
+  return { user, loading, error, login, logout, isAuthenticated, hasRole, bootstrapping };
 }

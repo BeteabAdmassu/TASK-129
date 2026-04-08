@@ -25,14 +25,16 @@ function routeRoles(path: string): string[] {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, bootstrapping } = useAuth();
+  if (bootstrapping) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (user?.must_change_password) return <ForcePasswordChangePage />;
   return <Layout>{children}</Layout>;
 }
 
 function RoleRoute({ children, roles }: { children: React.ReactNode; roles: string[] }) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, bootstrapping } = useAuth();
+  if (bootstrapping) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (user?.must_change_password) return <ForcePasswordChangePage />;
   if (user && !roles.includes(user.role)) return <Navigate to="/" replace />;

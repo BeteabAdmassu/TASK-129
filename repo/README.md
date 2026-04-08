@@ -287,6 +287,29 @@ npm run electron:dev
 
 PostgreSQL is bundled automatically via embedded-postgres — no separate installation is required.
 
+### Desktop Acceptance Verification (packaged app — no Docker required)
+
+This path verifies the fully packaged desktop application, independent of Docker or any development toolchain.
+
+**Prerequisites:** Windows 10/11 x64, no Docker, no Node.js, no Go required.
+
+**Steps:**
+
+1. Run the installer from `frontend/dist-installer/MedOps Console Setup *.exe` (or the `.msi`).
+2. Launch **MedOps Console** from the Start Menu or Desktop shortcut.
+3. The app starts the embedded PostgreSQL and Go backend automatically. Wait for the main window to appear (typically a few seconds).
+4. Log in with the default credentials: **admin / AdminPass1234**. You will be prompted to change your password on first login.
+5. Verify core flows:
+   - **Inventory** — create a SKU, receive stock, dispense stock.
+   - **Work Orders** — submit a work order, update status to dispatched, close it.
+   - **Members** — create a member, redeem a benefit, freeze and unfreeze.
+   - **Learning** — create a subject, chapter, and knowledge point; export the knowledge point as Markdown.
+   - **Backup** — navigate to System Config → Backup, trigger a backup, confirm the `.sql` file and managed-files `.zip` are listed.
+6. Verify tray behavior: minimize the window; the system tray icon should be visible. Right-click the tray icon to access Lock, Reminders, and New Window.
+7. Verify offline operation: disconnect from the network and repeat any of the above flows — all functions should work without internet access.
+
+> No Docker commands are needed for this path. The Docker setup in the sections above is for development/CI use only.
+
 ### Offline updates and version rollback
 
 Update packages are `.zip` archives distributed on a USB drive or shared network share — no internet required.

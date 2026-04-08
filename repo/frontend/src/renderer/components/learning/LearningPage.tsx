@@ -8,6 +8,7 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import ErrorMessage from '../common/ErrorMessage';
 import EmptyState from '../common/EmptyState';
 import Pagination from '../common/Pagination';
+import ContextMenu from '../common/ContextMenu';
 
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '0.5rem', border: '1px solid #ccc', borderRadius: 4, fontSize: '0.9rem', boxSizing: 'border-box',
@@ -86,6 +87,9 @@ const LearningPage: React.FC = () => {
 
   // Export format selection per knowledge point (kp.id → 'md' | 'html')
   const [exportFormats, setExportFormats] = useState<Record<string, 'md' | 'html'>>({});
+
+  // Context menu for knowledge point rows
+  const [ctxKp, setCtxKp] = useState<{ x: number; y: number; kp: KnowledgePoint } | null>(null);
 
   // Import modal state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -294,6 +298,17 @@ const LearningPage: React.FC = () => {
   const displayTotal = searchResults !== null ? searchTotal : kpTotal;
   const displayPage = searchResults !== null ? searchPage : kpPage;
 
+  // F2 shortcut: open edit form for the first visible knowledge point
+  useEffect(() => {
+    const handler = () => {
+      const target = displayKps[0];
+      if (target) openKpForm(target);
+    };
+    window.addEventListener('medops:edit-row', handler);
+    return () => window.removeEventListener('medops:edit-row', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayKps]);
+
   const handleSubjectDraftRestore = (state: unknown) => {
     const s = state as typeof subjectForm;
     if (s && typeof s === 'object') {
@@ -470,7 +485,8 @@ const LearningPage: React.FC = () => {
             <EmptyState message="No knowledge points" actionLabel="Create Knowledge Point" onAction={() => openKpForm()} />
           )}
           {displayKps.map(kp => (
-            <div key={kp.id} style={{ padding: '0.75rem', marginBottom: '0.5rem', border: '1px solid #eee', borderRadius: 4 }}>
+            <div key={kp.id} style={{ padding: '0.75rem', marginBottom: '0.5rem', border: '1px solid #eee', borderRadius: 4 }}
+              onContextMenu={e => { e.preventDefault(); setCtxKp({ x: e.clientX, y: e.clientY, kp }); }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <h4 style={{ margin: 0 }}>{kp.title}</h4>
                 <div style={{ display: 'flex', gap: '0.25rem' }}>
@@ -503,6 +519,47 @@ const LearningPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Knowledge Point Context Menu */}
+      {ctxKp && (
+        <ContextMenu x={ctxKp.x} y={ctxKp.y} onClose={() => setCtxKp(null)} items={[
+          { label: 'Edit Knowledge Point', onClick: () => { openKpForm(ctxKp.kp); setCtxKp(null); } },
+          {
+            label: 'Export as MD',
+            onClick: () => {
+              setExportFormats(prev => ({ ...prev, [ctxKp.kp.id]: 'md' }));
+              learningAPI.exportContent(ctxKp.kp.id, 'md')
+                .then(r => {
+                  const url = window.URL.createObjectURL(new Blob([r.data], { type: 'text/markdown' }));
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${(ctxKp.kp.title || ctxKp.kp.id).replace(/[/\\?%*:|"<>]/g, '-')}.md`;
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                })
+                .catch(e => alert('Export failed: ' + (e.response?.data?.error || e.message)));
+              setCtxKp(null);
+            },
+          },
+          {
+            label: 'Export as HTML',
+            onClick: () => {
+              setExportFormats(prev => ({ ...prev, [ctxKp.kp.id]: 'html' }));
+              learningAPI.exportContent(ctxKp.kp.id, 'html')
+                .then(r => {
+                  const url = window.URL.createObjectURL(new Blob([r.data], { type: 'text/html' }));
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${(ctxKp.kp.title || ctxKp.kp.id).replace(/[/\\?%*:|"<>]/g, '-')}.html`;
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                })
+                .catch(e => alert('Export failed: ' + (e.response?.data?.error || e.message)));
+              setCtxKp(null);
+            },
+          },
+        ]} />
+      )}
 
       {/* Import Modal */}
       {showImportModal && (

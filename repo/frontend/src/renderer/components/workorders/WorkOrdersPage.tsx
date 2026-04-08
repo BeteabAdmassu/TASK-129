@@ -69,6 +69,19 @@ const WorkOrdersPage: React.FC = () => {
     return () => window.removeEventListener('medops:create-new', handler);
   }, []);
 
+  // Track the last-clicked/focused work order for keyboard navigation
+  const [focusedWO, setFocusedWO] = useState<WorkOrder | null>(null);
+
+  // F2 shortcut: navigate to the focused work order detail (or first in list)
+  useEffect(() => {
+    const handler = () => {
+      const target = focusedWO ?? filteredData[0];
+      if (target) navigate(`/work-orders/${target.id}`);
+    };
+    window.addEventListener('medops:edit-row', handler);
+    return () => window.removeEventListener('medops:edit-row', handler);
+  }, [focusedWO, filteredData, navigate]);
+
   // Draft auto-save: saves create form state every 30s
   const { clearDraft } = useDraftAutoSave('work_order', 'default', createForm);
 
@@ -253,8 +266,8 @@ const WorkOrdersPage: React.FC = () => {
           <DataTable<WorkOrder>
             columns={columns}
             data={filteredData}
-            onRowClick={(wo) => navigate(`/work-orders/${wo.id}`)}
-            onContextMenu={(wo, e) => setCtxMenu({ x: e.clientX, y: e.clientY, order: wo })}
+            onRowClick={(wo) => { setFocusedWO(wo); navigate(`/work-orders/${wo.id}`); }}
+            onContextMenu={(wo, e) => { setFocusedWO(wo); setCtxMenu({ x: e.clientX, y: e.clientY, order: wo }); }}
           />
           <Pagination page={page} pageSize={20} total={data?.total || 0} onPageChange={setPage} />
         </>

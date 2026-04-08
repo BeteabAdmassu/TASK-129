@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"time"
 
@@ -12,6 +14,13 @@ import (
 	"medops/internal/models"
 	"medops/internal/repository"
 )
+
+// usernameHash returns a short SHA-256 prefix of the username for audit logs,
+// avoiding PII exposure while preserving traceability across log entries.
+func usernameHash(username string) string {
+	h := sha256.Sum256([]byte(username))
+	return hex.EncodeToString(h[:])[:8]
+}
 
 // AuthHandler handles authentication-related requests.
 type AuthHandler struct {
@@ -44,14 +53,14 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	user, err := h.repo.GetUserByUsername(req.Username)
 	if err != nil {
-		logrus.WithField("username", req.Username).Error("Database error during login")
+		logrus.WithField("username_hash", usernameHash(req.Username)).Error("Database error during login")
 		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error: "Invalid credentials",
 			Code:  http.StatusUnauthorized,
 		})
 	}
 	if user == nil {
-		logrus.WithField("username", req.Username).Warn("Login attempt for unknown user")
+		logrus.WithField("username_hash", usernameHash(req.Username)).Warn("Login attempt for unknown user")
 		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error: "Invalid credentials",
 			Code:  http.StatusUnauthorized,
@@ -59,7 +68,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	}
 
 	if !user.IsActive {
-		logrus.WithField("username", req.Username).Warn("Login attempt for inactive user")
+		logrus.WithField("username_hash", usernameHash(req.Username)).Warn("Login attempt for inactive user")
 		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{
 			Error:   "Account disabled",
 			Code:    http.StatusUnauthorized,
@@ -69,7 +78,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	// Check lockout
 	if user.LockedUntil != nil && user.LockedUntil.After(time.Now()) {
-		logrus.WithField("username", req.Username).Warn("Login attempt for locked user")
+		logrus.WithField("username_hash", usernameHash(req.Username)).Warn("Login attempt for locked user")
 		return c.JSON(http.StatusLocked, models.ErrorResponse{
 			Error:   "Account locked",
 			Code:    http.StatusLocked,
@@ -89,7 +98,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 			if lockErr := h.repo.LockUser(user.ID, 15); lockErr != nil {
 				logrus.WithError(lockErr).Error("Failed to lock user")
 			}
-			logrus.WithField("username", req.Username).Warn("Account locked due to failed attempts")
+			logrus.WithField("username_hash", usernameHash(req.Username)).Warn("Account locked due to failed attempts")
 		}
 
 		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{

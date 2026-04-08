@@ -236,6 +236,44 @@ func copyFile(src, dst string, mode os.FileMode) error {
 
 // ─── Backup helpers ───────────────────────────────────────────────────────────
 
+// zipManagedFiles creates a ZIP of all non-directory files in dir at destFile.
+// Subdirectories (backups/, active/, versions/, updates/) are intentionally skipped
+// because managed-file attachments are stored as flat UUID-named files directly in dir.
+func zipManagedFiles(dir, destFile string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read data dir: %w", err)
+	}
+	out, err := os.Create(destFile)
+	if err != nil {
+		return fmt.Errorf("create archive: %w", err)
+	}
+	defer out.Close()
+	w := zip.NewWriter(out)
+	defer w.Close()
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		src := filepath.Join(dir, name)
+		zw, addErr := w.Create(name)
+		if addErr != nil {
+			return fmt.Errorf("add %s to archive: %w", name, addErr)
+		}
+		f, openErr := os.Open(src)
+		if openErr != nil {
+			return fmt.Errorf("open %s: %w", name, openErr)
+		}
+		_, copyErr := io.Copy(zw, f)
+		f.Close()
+		if copyErr != nil {
+			return fmt.Errorf("copy %s: %w", name, copyErr)
+		}
+	}
+	return nil
+}
+
 // preUpdateBackup runs pg_dump before applying an update so rollback has a precise snapshot.
 func (h *SystemHandler) preUpdateBackup() (string, error) {
 	backupDir := filepath.Join(h.dataDir, "backups")
@@ -277,6 +315,15 @@ func (h *SystemHandler) Backup(c echo.Context) error {
 		})
 	}
 
+	// Archive managed-file attachments (flat UUID-named files in dataDir, subdirs excluded).
+	filesArchive := filepath.Join(backupDir, fmt.Sprintf("backup_files_%s.zip", timestamp))
+	filesArchiveWarn := ""
+	if archiveErr := zipManagedFiles(h.dataDir, filesArchive); archiveErr != nil {
+		logrus.WithError(archiveErr).Warn("Managed-files archive failed — SQL dump still completed")
+		filesArchive = ""
+		filesArchiveWarn = archiveErr.Error()
+	}
+
 	h.repo.CreateAuditLog(&models.AuditLogEntry{
 		UserID:     userID,
 		Action:     "backup_completed",
@@ -285,15 +332,21 @@ func (h *SystemHandler) Backup(c echo.Context) error {
 	})
 
 	logrus.WithFields(logrus.Fields{
-		"user_id":     userID,
-		"backup_file": backupFile,
+		"user_id":       userID,
+		"backup_file":   backupFile,
+		"files_archive": filesArchive,
 	}).Info("Backup completed")
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"message":     "Backup completed successfully",
-		"backup_file": backupFile,
-		"timestamp":   timestamp,
-	})
+	resp := map[string]string{
+		"message":       "Backup completed successfully",
+		"backup_file":   backupFile,
+		"files_archive": filesArchive,
+		"timestamp":     timestamp,
+	}
+	if filesArchiveWarn != "" {
+		resp["warning"] = "Managed-file archive failed: " + filesArchiveWarn
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 // BackupStatus returns backup status by checking for recent backup files.

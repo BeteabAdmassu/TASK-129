@@ -37,6 +37,19 @@ const SKUListPage: React.FC = () => {
     return () => window.removeEventListener('medops:create-new', handler);
   }, []);
 
+  // Track the last-clicked/focused SKU for keyboard navigation
+  const [focusedSKU, setFocusedSKU] = useState<SKU | null>(null);
+
+  // F2 shortcut: navigate to the focused SKU detail (or first in list)
+  useEffect(() => {
+    const handler = () => {
+      const target = focusedSKU ?? skus[0];
+      if (target) navigate(`/skus/${target.id}`);
+    };
+    window.addEventListener('medops:edit-row', handler);
+    return () => window.removeEventListener('medops:edit-row', handler);
+  }, [focusedSKU, skus, navigate]);
+
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -311,8 +324,8 @@ const SKUListPage: React.FC = () => {
           <DataTable
             columns={columns}
             data={skus}
-            onRowClick={(sku) => navigate(`/skus/${sku.id}`)}
-            onContextMenu={(sku, e) => setCtxMenu({ x: e.clientX, y: e.clientY, sku })}
+            onRowClick={(sku) => { setFocusedSKU(sku); navigate(`/skus/${sku.id}`); }}
+            onContextMenu={(sku, e) => { setFocusedSKU(sku); setCtxMenu({ x: e.clientX, y: e.clientY, sku }); }}
           />
           <Pagination page={page} pageSize={pageSize} total={total} onPageChange={setPage} />
         </>

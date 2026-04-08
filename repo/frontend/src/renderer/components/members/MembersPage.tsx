@@ -56,6 +56,9 @@ const MembersPage: React.FC = () => {
     return () => window.removeEventListener('medops:create-new', handler);
   }, []);
 
+  // Track the last-clicked/focused member for keyboard navigation
+  const [focusedMember, setFocusedMember] = useState<Member | null>(null);
+
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', id_number: '', phone: '', tier_id: '' });
@@ -125,6 +128,29 @@ const MembersPage: React.FC = () => {
     return tier ? tier.name : tierId;
   };
 
+  const handleExportPrint = (member: Member) => {
+    const headers = ['ID', 'Name', 'Phone', 'Tier', 'Points Balance', 'Stored Value', 'Status', 'Expires At', 'Created At'];
+    const row = [
+      member.id,
+      member.name,
+      member.phone,
+      tierName(member.tier_id),
+      member.points_balance,
+      member.stored_value.toFixed(2),
+      member.status,
+      member.expires_at ? new Date(member.expires_at).toISOString() : '',
+      member.created_at ? new Date(member.created_at).toISOString() : '',
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`);
+    const csv = [headers.join(','), row.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `member-${member.id}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   const columns = [
     { key: 'name', header: 'Name', sortable: true },
     { key: 'phone', header: 'Phone', sortable: true },
@@ -149,6 +175,16 @@ const MembersPage: React.FC = () => {
   ];
 
   const members = data?.data || [];
+
+  // F2 shortcut: navigate to the focused member detail (or first in list)
+  useEffect(() => {
+    const handler = () => {
+      const target = focusedMember ?? members[0];
+      if (target) navigate(`/members/${target.id}`);
+    };
+    window.addEventListener('medops:edit-row', handler);
+    return () => window.removeEventListener('medops:edit-row', handler);
+  }, [focusedMember, members, navigate]);
 
   const handleMemberDraftRestore = (state: unknown) => {
     if (!state || typeof state !== 'object') return;
@@ -196,8 +232,8 @@ const MembersPage: React.FC = () => {
           <DataTable<Member>
             columns={columns}
             data={members}
-            onRowClick={(m) => navigate(`/members/${m.id}`)}
-            onContextMenu={(m, e) => setCtxMenu({ x: e.clientX, y: e.clientY, member: m })}
+            onRowClick={(m) => { setFocusedMember(m); navigate(`/members/${m.id}`); }}
+            onContextMenu={(m, e) => { setFocusedMember(m); setCtxMenu({ x: e.clientX, y: e.clientY, member: m }); }}
           />
           <Pagination page={page} pageSize={20} total={data?.total || 0} onPageChange={setPage} />
         </>
@@ -226,6 +262,19 @@ const MembersPage: React.FC = () => {
             label: 'Unfreeze',
             onClick: () => handleUnfreeze(ctxMenu.member),
             disabled: ctxMenu.member.status !== 'frozen',
+          },
+          {
+            label: 'Cancel / Void Membership',
+            onClick: () => {
+              if (window.confirm(`Void membership for ${ctxMenu.member.name}? This will freeze the account.`)) {
+                handleFreeze(ctxMenu.member);
+              }
+            },
+            disabled: ctxMenu.member.status === 'frozen' || ctxMenu.member.status === 'expired',
+          },
+          {
+            label: 'Export / Print',
+            onClick: () => handleExportPrint(ctxMenu.member),
           },
         ]} />
       )}
